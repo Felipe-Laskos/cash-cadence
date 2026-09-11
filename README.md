@@ -28,3 +28,13 @@ Antes de commitar:
 ```bash
 mix precommit
 ```
+
+No WSL, instale `inotify-tools` para o live reload funcionar (`sudo apt install inotify-tools`).
+
+Para carregar a planilha original (arquivos fora do repositório, em `priv/repo/seeds/private/`):
+
+```bash
+mix cash.import_sheet
+```
+
+O primeiro acesso cria a única conta em `/users/register`; depois disso o cadastro fecha.
