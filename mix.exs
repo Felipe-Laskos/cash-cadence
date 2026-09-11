@@ -40,6 +40,7 @@ defmodule CashCadence.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:bcrypt_elixir, "~> 3.0"},
       {:phoenix, "~> 1.8.13"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
@@ -66,6 +67,8 @@ defmodule CashCadence.MixProject do
        compile: false,
        depth: 1},
       {:swoosh, "~> 1.16"},
+      {:nimble_csv, "~> 1.3"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
@@ -95,7 +98,13 @@ defmodule CashCadence.MixProject do
         "esbuild cash_cadence --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "credo --strict",
+        "test"
+      ]
     ]
   end
 end
