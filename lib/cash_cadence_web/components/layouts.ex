@@ -31,42 +31,80 @@ defmodule CashCadenceWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :nav, :atom, default: nil
+
   slot :inner_block, required: true
 
-  def app(assigns) do
+  def app(%{current_scope: nil} = assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
-        </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://phoenix.hexdocs.pm/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
-    </header>
-
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+    <main class="flex min-h-dvh items-center justify-center px-4 py-10">
+      <div class="w-full max-w-md space-y-6">
+        <p class="text-center text-2xl font-extrabold tracking-tight">
+          Cash<span class="text-primary">Cadence</span>
+        </p>
         {render_slot(@inner_block)}
       </div>
     </main>
+
+    <.flash_group flash={@flash} />
+    """
+  end
+
+  def app(assigns) do
+    ~H"""
+    <div class="min-h-dvh lg:flex">
+      <aside class="hidden border-r border-base-300 bg-base-100 lg:fixed lg:inset-y-0 lg:flex lg:w-60 lg:flex-col lg:gap-6 lg:px-4 lg:py-6">
+        <.link navigate={~p"/"} class="px-3 text-xl font-extrabold tracking-tight">
+          Cash<span class="text-primary">Cadence</span>
+        </.link>
+        <nav class="flex flex-col gap-1">
+          <.nav_link navigate={~p"/"} icon="hero-home" active={@nav == :month}>Visão do mês</.nav_link>
+          <.nav_link
+            navigate={~p"/lancamentos"}
+            icon="hero-list-bullet"
+            active={@nav == :transactions}
+          >Lançamentos</.nav_link>
+        </nav>
+        <div class="mt-auto flex flex-col gap-3 border-t border-base-300 pt-4">
+          <div class="flex items-center justify-between gap-2 px-1">
+            <span class="truncate text-xs text-base-content/60" title={@current_scope.user.email}>{@current_scope.user.email}</span>
+            <.theme_toggle />
+          </div>
+          <div class="flex items-center gap-1 px-1 text-sm">
+            <.link href={~p"/users/settings"} class="btn btn-ghost btn-sm">Configurações</.link>
+            <.link href={~p"/users/log-out"} method="delete" class="btn btn-ghost btn-sm">Sair</.link>
+          </div>
+        </div>
+      </aside>
+
+      <div class="flex-1 lg:pl-60">
+        <header class="navbar gap-2 border-b border-base-300 bg-base-100 px-4 lg:hidden">
+          <.link navigate={~p"/"} class="text-lg font-extrabold tracking-tight">
+            Cash<span class="text-primary">Cadence</span>
+          </.link>
+          <nav class="ml-auto flex items-center gap-1 text-sm">
+            <.link navigate={~p"/"} class={["btn btn-ghost btn-sm", @nav == :month && "btn-active"]}>Mês</.link>
+            <.link
+              navigate={~p"/lancamentos"}
+              class={["btn btn-ghost btn-sm", @nav == :transactions && "btn-active"]}
+            >Lançamentos</.link>
+            <.link
+              href={~p"/users/settings"}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Configurações"
+            >
+              <.icon name="hero-cog-6-tooth" class="size-5" />
+            </.link>
+          </nav>
+        </header>
+
+        <main class="px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+          <div class="mx-auto max-w-7xl space-y-6">
+            {render_slot(@inner_block)}
+          </div>
+        </main>
+      </div>
+    </div>
 
     <.flash_group flash={@flash} />
     """

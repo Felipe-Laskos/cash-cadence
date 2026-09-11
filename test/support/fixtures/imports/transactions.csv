@@ -1,0 +1,8 @@
+row,date,type,category,category_kind,description,amount
+8,2026-05-02,expense,Mercado,expense,Compras da semana,150.00
+9,2026-05-03,expense,Telefone,expense,,40.00
+10,2026-05-04,expense,telefone,expense,,41.99
+11,2026-05-05,income,Salario,income,,3000.00
+12,2026-05-06,expense,?,,,31.36
+13,2026-05-07,income,Amigo,person,Reembolso,20.00
+14,2026-05-08,income,Lucros,income,,0.0

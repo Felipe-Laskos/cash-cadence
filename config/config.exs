@@ -7,6 +7,19 @@
 # General application configuration
 import Config
 
+config :cash_cadence, :scopes,
+  user: [
+    default: true,
+    module: CashCadence.Identity.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :users,
+    test_data_fixture: CashCadence.IdentityFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :cash_cadence,
   ecto_repos: [CashCadence.Repo],
   generators: [timestamp_type: :utc_datetime]
@@ -57,6 +70,8 @@ config :tailwind,
     cd: Path.expand("..", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
+
+config :cash_cadence, CashCadenceWeb.Gettext, default_locale: "pt_BR"
 
 # Configure Elixir's Logger
 config :logger, :default_formatter,

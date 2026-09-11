@@ -86,6 +86,8 @@ defmodule CashCadenceWeb do
       import Phoenix.HTML
       # Core UI components
       import CashCadenceWeb.CoreComponents
+      import CashCadenceWeb.Format
+      import CashCadenceWeb.UIComponents
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS
