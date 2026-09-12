@@ -74,6 +74,19 @@ defmodule CashCadenceWeb.Format do
 
   def month_param(%Date{} = date), do: Calendar.strftime(date, "%Y-%m")
 
+  def month_range_label(%Date{} = from, %Date{} = to) do
+    cond do
+      from == to ->
+        month_label(from)
+
+      from.year == to.year ->
+        "#{Enum.at(@months_short, from.month - 1)}–#{Enum.at(@months_short, to.month - 1)}/#{to.year}"
+
+      true ->
+        "#{month_short(from)}–#{month_short(to)}"
+    end
+  end
+
   def parse_month(<<year::binary-size(4), "-", month::binary-size(2)>>) do
     case Date.from_iso8601(year <> "-" <> month <> "-01") do
       {:ok, date} -> {:ok, date}

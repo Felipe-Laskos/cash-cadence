@@ -93,4 +93,15 @@ defmodule CashCadenceWeb.TransactionLiveTest do
     assert render(view) =~ "Lançamento excluído."
     assert Ledger.list_transactions() == []
   end
+
+  test "prefills the quick form from the query string", %{conn: conn} do
+    {:ok, view, _html} =
+      live(
+        conn,
+        ~p"/lancamentos?m=2026-05&new=1&kind=expense&category_name=Combust%C3%ADvel&amount=350%2C00"
+      )
+
+    assert has_element?(view, "#transaction_category_name[value='Combustível']")
+    assert has_element?(view, "#transaction_amount[value='350,00']")
+  end
 end

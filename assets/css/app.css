@@ -126,6 +126,10 @@
   --chart-cat-5: #d55181;
   --chart-cat-6: #008300;
   --chart-cat-other: #6b7280;
+  --seq-1: #132c3a;
+  --seq-2: #153f55;
+  --seq-3: #1b5978;
+  --seq-4: #2477a0;
 }
 
 [data-theme="light"] {
@@ -141,6 +145,10 @@
   --chart-cat-5: #e87ba4;
   --chart-cat-6: #008300;
   --chart-cat-other: #b8b3aa;
+  --seq-1: #e5f0f7;
+  --seq-2: #cce2ef;
+  --seq-3: #a6cae0;
+  --seq-4: #79accb;
 }
 
 body {

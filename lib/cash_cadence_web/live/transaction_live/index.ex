@@ -34,7 +34,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
     socket =
       socket
       |> assign(month: month, filters: filters, editing: editing, focus_new: params["new"] == "1")
-      |> assign_form(form_changeset(editing, month))
+      |> assign_form(form_changeset(editing, month, prefill(params)))
       |> reload()
 
     {:noreply, socket}
@@ -82,15 +82,25 @@ defmodule CashCadenceWeb.TransactionLive.Index do
     end)
   end
 
-  defp form_changeset(nil, month) do
-    Ledger.change_transaction(%Transaction{}, %{date: default_date(month), kind: :expense})
+  defp form_changeset(nil, month, prefill) do
+    attrs =
+      Map.merge(%{"date" => Date.to_iso8601(default_date(month)), "kind" => "expense"}, prefill)
+
+    Ledger.change_transaction(%Transaction{}, attrs)
   end
 
-  defp form_changeset(%Transaction{} = transaction, _month) do
+  defp form_changeset(%Transaction{} = transaction, _month, _prefill) do
     Ledger.change_transaction(%{
       transaction
       | category_name: transaction.category && transaction.category.name
     })
+  end
+
+  defp prefill(params) do
+    params
+    |> Map.take(["kind", "category_name", "amount", "description"])
+    |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+    |> Map.new()
   end
 
   defp default_date(month) do
@@ -154,7 +164,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
             kind: transaction.kind
           })
 
-        {:noreply, socket |> assign_form(changeset) |> reload()}
+        {:noreply, socket |> assign(focus_new: false) |> assign_form(changeset) |> reload()}
 
       {:error, changeset} ->
         {:noreply, assign_form(socket, changeset)}

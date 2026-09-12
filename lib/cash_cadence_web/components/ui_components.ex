@@ -77,7 +77,7 @@ defmodule CashCadenceWeb.UIComponents do
   defp badge_class(_), do: "badge-ghost"
 
   attr :category, :map, default: nil
-  attr :fixed, :boolean, default: false
+  attr :show_fixed, :boolean, default: true
 
   def category_chip(assigns) do
     ~H"""
@@ -85,7 +85,10 @@ defmodule CashCadenceWeb.UIComponents do
       {@category.name}
       <span :if={@category.kind == :person} class="text-[10px] uppercase text-base-content/50">pessoa</span>
     </span>
-    <span :if={@category && @category.fixed} class="badge badge-soft badge-info badge-sm">fixa</span>
+    <span
+      :if={@show_fixed && @category && @category.fixed}
+      class="badge badge-soft badge-info badge-sm"
+    >fixa</span>
     <span :if={!@category} class="badge badge-soft badge-warning gap-1 whitespace-nowrap font-medium">
       <.icon name="hero-exclamation-triangle-micro" class="size-3" /> Sem categoria
     </span>
@@ -168,6 +171,28 @@ defmodule CashCadenceWeb.UIComponents do
         "flex items-center gap-3 rounded-field px-3 py-2 text-sm font-medium transition-colors",
         @active && "bg-secondary text-secondary-content",
         !@active && "text-base-content/70 hover:bg-base-300 hover:text-base-content"
+      ]}
+      aria-current={@active && "page"}
+    >
+      <.icon name={@icon} class="size-5" />
+      {render_slot(@inner_block)}
+    </.link>
+    """
+  end
+
+  attr :navigate, :string, required: true
+  attr :icon, :string, required: true
+  attr :active, :boolean, default: false
+  slot :inner_block, required: true
+
+  def tab_link(assigns) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      class={[
+        "flex min-h-12 w-16 flex-col items-center gap-0.5 pt-1 text-[11px] font-medium",
+        @active && "text-primary",
+        !@active && "text-base-content/60"
       ]}
       aria-current={@active && "page"}
     >

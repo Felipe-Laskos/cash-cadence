@@ -48,11 +48,15 @@ defmodule CashCadenceWeb.Router do
       on_mount: [{CashCadenceWeb.UserAuth, :require_authenticated}] do
       live "/", MonthLive, :index
       live "/lancamentos", TransactionLive.Index, :index
+      live "/fixas", BillLive.Index, :index
+      live "/categorias", CategoryLive.Index, :index
+      live "/relatorios", ReportLive, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end
 
     post "/users/update-password", UserSessionController, :update_password
+    get "/relatorios/export.csv", ExportController, :transactions
   end
 
   scope "/", CashCadenceWeb do

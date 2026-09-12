@@ -12,6 +12,8 @@ defmodule CashCadence.Budgets.RecurringBill do
     field :expected_amount, :decimal
     field :due_day, :integer
     field :active, :boolean, default: true
+    field :kind, Ecto.Enum, values: [:expense, :income], default: :expense
+    field :category_name, :string, virtual: true
 
     belongs_to :category, Category
 
@@ -25,13 +27,19 @@ defmodule CashCadence.Budgets.RecurringBill do
       :expected_amount,
       :due_day,
       :active,
-      :category_id
+      :kind,
+      :category_id,
+      :category_name
     ])
-    |> validate_required([:name, :expected_amount, :category_id])
+    |> update_change(:name, &trim/1)
+    |> validate_required([:name, :expected_amount, :kind, :category_id])
     |> validate_length(:name, max: 60)
     |> validate_number(:expected_amount, greater_than: 0)
     |> validate_number(:due_day, greater_than_or_equal_to: 1, less_than_or_equal_to: 31)
     |> foreign_key_constraint(:category_id)
-    |> unique_constraint(:name)
+    |> unique_constraint(:name, message: "já existe uma despesa fixa com esse nome")
   end
+
+  defp trim(nil), do: nil
+  defp trim(name), do: String.trim(name)
 end

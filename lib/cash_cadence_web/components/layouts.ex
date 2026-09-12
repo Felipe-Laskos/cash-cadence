@@ -63,11 +63,18 @@ defmodule CashCadenceWeb.Layouts do
             navigate={~p"/lancamentos"}
             icon="hero-list-bullet"
             active={@nav == :transactions}
-          >Lançamentos</.nav_link>
+          >
+            Lançamentos
+          </.nav_link>
+          <.nav_link navigate={~p"/fixas"} icon="hero-arrow-path" active={@nav == :bills}>Despesas fixas</.nav_link>
+          <.nav_link navigate={~p"/categorias"} icon="hero-tag" active={@nav == :categories}>Categorias</.nav_link>
+          <.nav_link navigate={~p"/relatorios"} icon="hero-chart-bar" active={@nav == :reports}>Relatórios</.nav_link>
         </nav>
         <div class="mt-auto flex flex-col gap-3 border-t border-base-300 pt-4">
           <div class="flex items-center justify-between gap-2 px-1">
-            <span class="truncate text-xs text-base-content/60" title={@current_scope.user.email}>{@current_scope.user.email}</span>
+            <span class="truncate text-xs text-base-content/60" title={@current_scope.user.email}>
+              {@current_scope.user.email}
+            </span>
             <.theme_toggle />
           </div>
           <div class="flex items-center gap-1 px-1 text-sm">
@@ -83,11 +90,13 @@ defmodule CashCadenceWeb.Layouts do
             Cash<span class="text-primary">Cadence</span>
           </.link>
           <nav class="ml-auto flex items-center gap-1 text-sm">
-            <.link navigate={~p"/"} class={["btn btn-ghost btn-sm", @nav == :month && "btn-active"]}>Mês</.link>
             <.link
-              navigate={~p"/lancamentos"}
-              class={["btn btn-ghost btn-sm", @nav == :transactions && "btn-active"]}
-            >Lançamentos</.link>
+              navigate={~p"/categorias"}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Categorias"
+            >
+              <.icon name="hero-tag" class="size-5" />
+            </.link>
             <.link
               href={~p"/users/settings"}
               class="btn btn-ghost btn-sm btn-square"
@@ -98,12 +107,28 @@ defmodule CashCadenceWeb.Layouts do
           </nav>
         </header>
 
-        <main class="px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+        <main class="px-4 py-6 pb-28 sm:px-6 lg:px-10 lg:py-8">
           <div class="mx-auto max-w-7xl space-y-6">
             {render_slot(@inner_block)}
           </div>
         </main>
       </div>
+
+      <nav class="fixed inset-x-0 bottom-0 z-20 flex items-start justify-around border-t border-base-300 bg-base-100 px-2 pb-[env(safe-area-inset-bottom)] pt-2 lg:hidden">
+        <.tab_link navigate={~p"/"} icon="hero-home" active={@nav == :month}>Início</.tab_link>
+        <.tab_link navigate={~p"/lancamentos"} icon="hero-list-bullet" active={@nav == :transactions}>
+          Lançamentos
+        </.tab_link>
+        <.link
+          navigate={~p"/lancamentos?#{%{"new" => "1"}}"}
+          class="-mt-6 flex size-14 items-center justify-center rounded-full bg-primary text-primary-content shadow-lg"
+          aria-label="Adicionar lançamento"
+        >
+          <.icon name="hero-plus" class="size-6" />
+        </.link>
+        <.tab_link navigate={~p"/fixas"} icon="hero-arrow-path" active={@nav == :bills}>Fixas</.tab_link>
+        <.tab_link navigate={~p"/relatorios"} icon="hero-chart-bar" active={@nav == :reports}>Relatórios</.tab_link>
+      </nav>
     </div>
 
     <.flash_group flash={@flash} />

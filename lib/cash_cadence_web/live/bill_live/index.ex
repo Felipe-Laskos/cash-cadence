@@ -1,0 +1,442 @@
+defmodule CashCadenceWeb.BillLive.Index do
+  use CashCadenceWeb, :live_view
+
+  alias CashCadence.Budgets
+  alias CashCadence.Budgets.RecurringBill
+  alias CashCadence.Ledger
+  alias CashCadence.Money
+
+  @kinds [{"Despesa", "expense"}, {"Receita", "income"}]
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok, assign(socket, page_title: "Despesas fixas", kinds: @kinds)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    month =
+      case parse_month(params["m"]) do
+        {:ok, date} -> date
+        :error -> Date.beginning_of_month(Date.utc_today())
+      end
+
+    editing = params["edit"] && Budgets.get_recurring_bill!(params["edit"])
+    form_open? = params["new"] == "1" or not is_nil(editing)
+
+    socket =
+      socket
+      |> assign(month: month, editing: editing, form_open?: form_open?)
+      |> assign_form(bill_changeset(editing))
+      |> reload()
+
+    {:noreply, socket}
+  end
+
+  defp reload(%{assigns: %{month: month}} = socket) do
+    totals = Ledger.month_totals(month)
+    coverage = Budgets.coverage(month, totals.income)
+
+    assign(socket,
+      totals: totals,
+      coverage: coverage,
+      panel: coverage.panel,
+      incomes: Budgets.expected_incomes(month),
+      adherence: Budgets.adherence(month, 3),
+      suggestions: Ledger.category_suggestions()
+    )
+  end
+
+  defp bill_changeset(nil), do: Budgets.change_recurring_bill(%RecurringBill{}, %{kind: :expense})
+
+  defp bill_changeset(%RecurringBill{} = bill) do
+    Budgets.change_recurring_bill(%{bill | category_name: bill.category && bill.category.name})
+  end
+
+  defp assign_form(socket, changeset), do: assign(socket, form: to_form(changeset))
+
+  defp bills_path(assigns, overrides \\ %{}) do
+    params =
+      %{"m" => month_param(assigns.month)}
+      |> Map.merge(overrides)
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Map.new()
+
+    ~p"/fixas?#{params}"
+  end
+
+  defp resolve_category(params) do
+    kind = if params["kind"] == "income", do: :income, else: :expense
+
+    case String.trim(params["category_name"] || "") do
+      "" ->
+        {:ok, params}
+
+      name ->
+        with {:ok, category} <- Ledger.find_or_create_category(name, kind) do
+          {:ok, Map.put(params, "category_id", category.id)}
+        end
+    end
+  end
+
+  @impl true
+  def handle_event("validate", %{"recurring_bill" => params}, socket) do
+    changeset =
+      (socket.assigns.editing || %RecurringBill{})
+      |> Budgets.change_recurring_bill(params)
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign_form(socket, changeset)}
+  end
+
+  def handle_event("save", %{"recurring_bill" => params}, socket) do
+    result =
+      with {:ok, params} <- resolve_category(params) do
+        case socket.assigns.editing do
+          nil -> Budgets.create_recurring_bill(params)
+          bill -> Budgets.update_recurring_bill(bill, params)
+        end
+      end
+
+    case result do
+      {:ok, _bill} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Despesa fixa salva.")
+         |> push_patch(to: bills_path(socket.assigns))}
+
+      {:error, changeset} ->
+        {:noreply, assign_form(socket, changeset)}
+    end
+  end
+
+  def handle_event("cancel", _params, socket),
+    do: {:noreply, push_patch(socket, to: bills_path(socket.assigns))}
+
+  def handle_event("delete", %{"id" => id}, socket) do
+    {:ok, _} = id |> Budgets.get_recurring_bill!() |> Budgets.delete_recurring_bill()
+    {:noreply, socket |> put_flash(:info, "Despesa fixa excluída.") |> reload()}
+  end
+
+  def handle_event("adjust", %{"id" => id, "amount" => amount}, socket) do
+    bill = Budgets.get_recurring_bill!(id)
+    {:ok, _} = Budgets.update_recurring_bill(bill, %{expected_amount: amount})
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Valor esperado ajustado para #{brl(Decimal.new(amount))}.")
+     |> reload()}
+  end
+
+  def handle_event("toggle", %{"id" => id}, socket) do
+    bill = Budgets.get_recurring_bill!(id)
+    {:ok, _} = Budgets.update_recurring_bill(bill, %{active: !bill.active})
+    {:noreply, reload(socket)}
+  end
+
+  defp status_text(%{status: :paid, over: over}) do
+    if Money.positive?(over), do: "Pago · #{amount(over)} acima", else: "Pago"
+  end
+
+  defp status_text(%{status: :partial, remaining: remaining}),
+    do: "Parcial · faltam #{amount(remaining)}"
+
+  defp status_text(%{status: :unpaid}), do: "Em aberto"
+
+  defp adherence_text(%{status: :paid, paid: paid}), do: "Pago · #{amount(paid)}"
+  defp adherence_text(%{status: :partial, paid: paid}), do: "Parcial · #{amount(paid)}"
+  defp adherence_text(%{status: :unpaid}), do: "Em aberto"
+
+  defp launch_path(month, item) do
+    ~p"/lancamentos?#{%{"m" => month_param(month), "new" => "1", "kind" => "expense", "category_name" => item.bill.category.name, "amount" => input_amount(item.remaining)}}"
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <Layouts.app flash={@flash} current_scope={@current_scope} nav={:bills}>
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 class="text-3xl font-bold tracking-tight">Despesas fixas</h1>
+          <p class="text-sm text-base-content/60">
+            O que se repete todo mês: valor esperado × o que já foi pago em {month_label(@month)}
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <.month_nav month={@month} base={~p"/fixas"} />
+          <.link patch={bills_path(assigns, %{"new" => "1"})} class="btn btn-primary btn-sm">
+            <.icon name="hero-plus-micro" class="size-4" /> Nova despesa fixa
+          </.link>
+        </div>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <.kpi label="Esperado no mês">
+          <span class="text-base font-medium text-base-content/50">R$</span> {amount(
+            @panel.expected_total
+          )}
+          <:footer>
+            {@panel.count} {if @panel.count == 1, do: "despesa fixa", else: "despesas fixas"}
+          </:footer>
+        </.kpi>
+        <.kpi label="Pago até agora">
+          <span class="text-base font-medium text-base-content/50">R$</span> {amount(
+            @panel.paid_total
+          )}
+          <:footer>
+            <div class="space-y-2">
+              <.progress
+                value={progress_share(@panel.paid_total, @panel.expected_total)}
+                kind={:paid}
+              />
+              <span><b>{progress_share(@panel.paid_total, @panel.expected_total)}%</b> do esperado</span>
+            </div>
+          </:footer>
+        </.kpi>
+        <.kpi label="Em aberto">
+          <span class={[Money.positive?(@panel.open_total) && "text-warning"]}>
+            <span class="text-base font-medium text-base-content/50">R$</span> {amount(
+              @panel.open_total
+            )}
+          </span>
+          <:footer>{open_text(@panel)}</:footer>
+        </.kpi>
+        <.kpi label="Cobertura">
+          <div class="flex items-center gap-3 text-sm">
+            <.badge :if={@panel.count > 0} kind={if(@coverage.covered?, do: :paid, else: :unpaid)}>
+              <.icon
+                name={
+                  if(@coverage.covered?,
+                    do: "hero-check-micro",
+                    else: "hero-exclamation-triangle-micro"
+                  )
+                }
+                class="size-3"
+              />
+              {if @coverage.covered?, do: "Coberto", else: "Déficit"}
+            </.badge>
+          </div>
+          <:footer>
+            <span :if={@coverage.ratio}>a receita de {month_name(@month)} ({brl(@totals.income)}) paga as fixas
+            <b>{@coverage.ratio
+            |> Decimal.round(1)
+            |> Decimal.to_string(:normal)
+            |> String.replace(".", ",")}×</b></span>
+            <span :if={!@coverage.ratio}>sem despesas fixas cadastradas</span>
+          </:footer>
+        </.kpi>
+      </div>
+
+      <section :if={@form_open?} class="card border border-primary/40 bg-base-100">
+        <.form
+          for={@form}
+          id="bill-form"
+          phx-change="validate"
+          phx-submit="save"
+          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_9rem_1fr_9rem_7rem_auto] md:items-end"
+        >
+          <.input field={@form[:name]} type="text" label="Nome" placeholder="Ex.: Internet" required />
+          <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
+          <div>
+            <.input
+              field={@form[:category_name]}
+              type="text"
+              label="Categoria vinculada"
+              list="bill-category-options"
+              autocomplete="off"
+              placeholder="Categoria"
+            />
+            <datalist id="bill-category-options">
+              <option :for={suggestion <- @suggestions} value={suggestion.name}>
+                {suggestion.uses} usos
+              </option>
+            </datalist>
+          </div>
+          <.input
+            field={@form[:expected_amount]}
+            type="text"
+            label="Valor esperado"
+            inputmode="decimal"
+            placeholder="0,00"
+            value={input_amount(@form[:expected_amount].value)}
+            required
+            class="input tabular text-right"
+          />
+          <.input
+            field={@form[:due_day]}
+            type="number"
+            label="Dia"
+            min="1"
+            max="31"
+            placeholder="—"
+          />
+          <div class="flex gap-1">
+            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
+              do: "Salvar",
+              else: "Adicionar"}</.button>
+            <button type="button" phx-click="cancel" class="btn">Cancelar</button>
+          </div>
+        </.form>
+      </section>
+
+      <section class="card border border-base-300 bg-base-100">
+        <.empty_state :if={@panel.items == []} icon="hero-arrow-path">
+          Nenhuma despesa fixa cadastrada. Comece pelas que se repetem todo mês.
+        </.empty_state>
+        <div :if={@panel.items != []} class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Despesa fixa</th>
+                <th>Categoria</th>
+                <th>Vencimento</th>
+                <th class="text-right">Esperado</th>
+                <th class="text-right">Pago em {month_name(@month)}</th>
+                <th class="w-40">Progresso</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={item <- @panel.items} id={"bill-#{item.bill.id}"}>
+                <td class="font-medium">{item.bill.name}</td>
+                <td><.category_chip category={item.bill.category} show_fixed={false} /></td>
+                <td class="text-base-content/60">
+                  {if item.bill.due_day, do: "dia #{item.bill.due_day}", else: "—"}
+                </td>
+                <td class="tabular text-right">{amount(item.expected)}</td>
+                <td class="tabular text-right">{amount(item.paid)}</td>
+                <td><.progress value={item.progress} kind={item.status} /></td>
+                <td>
+                  <.badge kind={item.status}>{status_text(item)}</.badge>
+                </td>
+                <td>
+                  <div class="flex items-center justify-end gap-1">
+                    <.link
+                      :if={item.status != :paid}
+                      navigate={launch_path(@month, item)}
+                      class="btn btn-ghost btn-xs"
+                    >
+                      <.icon name="hero-plus-micro" class="size-4" /> Lançar pagamento
+                    </.link>
+                    <button
+                      :if={Money.positive?(item.over)}
+                      type="button"
+                      phx-click="adjust"
+                      phx-value-id={item.bill.id}
+                      phx-value-amount={Decimal.to_string(item.paid, :normal)}
+                      class="btn btn-ghost btn-xs"
+                    >
+                      Ajustar esperado para {amount(item.paid)}
+                    </button>
+                    <.link
+                      patch={bills_path(assigns, %{"edit" => item.bill.id})}
+                      class="btn btn-ghost btn-xs btn-square"
+                      aria-label="Editar"
+                    >
+                      <.icon name="hero-pencil-square-micro" class="size-4" />
+                    </.link>
+                    <button
+                      type="button"
+                      phx-click="delete"
+                      phx-value-id={item.bill.id}
+                      data-confirm="Excluir esta despesa fixa? Os lançamentos continuam no livro."
+                      class="btn btn-ghost btn-xs btn-square"
+                      aria-label="Excluir"
+                    >
+                      <.icon name="hero-trash-micro" class="size-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="grid gap-4 xl:grid-cols-5">
+        <.card
+          title="Receitas esperadas"
+          subtitle="Entram na conta de cobertura"
+          class="xl:col-span-2"
+        >
+          <.empty_state :if={@incomes == []} icon="hero-banknotes">
+            Nenhuma receita esperada. Cadastre o salário como recorrência do tipo Receita.
+          </.empty_state>
+          <table :if={@incomes != []} class="table table-sm">
+            <thead>
+              <tr>
+                <th>Receita</th><th class="text-right">Esperado</th><th>
+                  {String.capitalize(month_name(@month))}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={income <- @incomes} id={"income-#{income.bill.id}"}>
+                <td class="font-medium">{income.bill.name}</td>
+                <td class="tabular text-right">{amount(income.expected)}</td>
+                <td>
+                  <.badge :if={income.status == :received} kind={:paid}>
+                    Recebido{if income.received_on, do: " em #{short_date(income.received_on)}"}
+                  </.badge>
+                  <.badge :if={income.status == :pending} kind={:neutral}>Sem recebimento</.badge>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </.card>
+
+        <.card
+          title="Adesão nos últimos 3 meses"
+          subtitle="Pago × parcial × em aberto, por mês de competência"
+          class="xl:col-span-3"
+        >
+          <.empty_state :if={@adherence.rows == []} icon="hero-calendar-days">
+            Sem despesas fixas para acompanhar.
+          </.empty_state>
+          <div :if={@adherence.rows != []} class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Fixa</th>
+                  <th :for={month <- @adherence.months}>{month_short(month)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={row <- @adherence.rows}>
+                  <td class="font-medium">{row.bill.name}</td>
+                  <td :for={cell <- row.statuses}>
+                    <.badge kind={cell.status}>{adherence_text(cell)}</.badge>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </.card>
+      </div>
+    </Layouts.app>
+    """
+  end
+
+  defp progress_share(paid, expected) do
+    case Money.ratio(paid, expected) do
+      nil ->
+        0
+
+      ratio ->
+        ratio
+        |> Decimal.mult(100)
+        |> Decimal.min(Decimal.new(100))
+        |> Decimal.round(0)
+        |> Decimal.to_integer()
+    end
+  end
+
+  defp open_text(%{items: items}) do
+    case Enum.reject(items, &(&1.status == :paid)) do
+      [] -> "tudo pago neste mês"
+      [item] -> "só #{item.bill.name} ainda não fechou"
+      pending -> "#{length(pending)} despesas ainda não fecharam"
+    end
+  end
+end

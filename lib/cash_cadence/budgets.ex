@@ -11,6 +11,7 @@ defmodule CashCadence.Budgets do
   def list_recurring_bills(opts \\ []) do
     RecurringBill
     |> maybe_active(Keyword.get(opts, :active, true))
+    |> maybe_kind(opts[:kind])
     |> order_by([b], asc: fragment("lower(?)", b.name))
     |> preload(:category)
     |> Repo.all()
@@ -18,6 +19,9 @@ defmodule CashCadence.Budgets do
 
   defp maybe_active(query, true), do: where(query, [b], b.active)
   defp maybe_active(query, _), do: query
+
+  defp maybe_kind(query, nil), do: query
+  defp maybe_kind(query, kind), do: where(query, [b], b.kind == ^kind)
 
   def get_recurring_bill!(id), do: RecurringBill |> preload(:category) |> Repo.get!(id)
 
@@ -37,12 +41,11 @@ defmodule CashCadence.Budgets do
     do: RecurringBill.changeset(bill, attrs)
 
   def month_panel(%Date{} = competence) do
-    paid = paid_by_category(competence)
+    paid = paid_by_category(competence, :expense)
 
     items =
-      Enum.map(list_recurring_bills(), fn bill ->
-        paid_amount = Map.get(paid, bill.category_id, Money.zero())
-        build_item(bill, paid_amount)
+      Enum.map(list_recurring_bills(kind: :expense), fn bill ->
+        build_item(bill, Map.get(paid, bill.category_id, Money.zero()))
       end)
 
     %{
@@ -53,6 +56,43 @@ defmodule CashCadence.Budgets do
       paid_count: Enum.count(items, &(&1.status == :paid)),
       count: length(items)
     }
+  end
+
+  def expected_incomes(%Date{} = competence) do
+    received = paid_by_category(competence, :income)
+
+    Enum.map(list_recurring_bills(kind: :income), fn bill ->
+      amount = Map.get(received, bill.category_id, Money.zero())
+
+      %{
+        bill: bill,
+        expected: bill.expected_amount,
+        received: amount,
+        status: if(Money.positive?(amount), do: :received, else: :pending),
+        received_on: received_on(bill.category_id, competence)
+      }
+    end)
+  end
+
+  def adherence(%Date{} = competence, months \\ 3) do
+    range =
+      Enum.map((months - 1)..0//-1, &Date.shift(Date.beginning_of_month(competence), month: -&1))
+
+    panels = Map.new(range, fn month -> {month, month_panel(month)} end)
+
+    rows =
+      list_recurring_bills(kind: :expense)
+      |> Enum.map(fn bill ->
+        statuses =
+          Enum.map(range, fn month ->
+            item = panels[month].items |> Enum.find(&(&1.bill.id == bill.id))
+            %{competence: month, status: item.status, paid: item.paid}
+          end)
+
+        %{bill: bill, statuses: statuses}
+      end)
+
+    %{months: range, rows: rows}
   end
 
   def coverage(%Date{} = competence, %Decimal{} = income) do
@@ -107,15 +147,25 @@ defmodule CashCadence.Budgets do
     end
   end
 
-  defp paid_by_category(competence) do
+  defp paid_by_category(competence, kind) do
     Repo.all(
       from t in Transaction,
         where:
-          is_nil(t.deleted_at) and t.kind == :expense and not is_nil(t.category_id) and
+          is_nil(t.deleted_at) and t.kind == ^kind and not is_nil(t.category_id) and
             t.competence == ^Date.beginning_of_month(competence),
         group_by: t.category_id,
         select: {t.category_id, sum(t.amount)}
     )
     |> Map.new()
+  end
+
+  defp received_on(category_id, competence) do
+    Repo.one(
+      from t in Transaction,
+        where:
+          is_nil(t.deleted_at) and t.kind == :income and t.category_id == ^category_id and
+            t.competence == ^Date.beginning_of_month(competence),
+        select: max(t.date)
+    )
   end
 end

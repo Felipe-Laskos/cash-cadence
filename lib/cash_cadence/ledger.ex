@@ -9,14 +9,83 @@ defmodule CashCadence.Ledger do
 
   def list_categories(opts \\ []) do
     Category
-    |> where([c], is_nil(c.archived_at))
+    |> maybe_archived(opts[:archived])
     |> maybe_kind(opts[:kind])
     |> order_by([c], asc: fragment("lower(?)", c.name))
     |> Repo.all()
   end
 
+  defp maybe_archived(query, :only), do: where(query, [c], not is_nil(c.archived_at))
+  defp maybe_archived(query, :all), do: query
+  defp maybe_archived(query, _), do: where(query, [c], is_nil(c.archived_at))
+
   defp maybe_kind(query, nil), do: query
   defp maybe_kind(query, kind), do: where(query, [c], c.kind == ^kind)
+
+  def archive_category(%Category{} = category) do
+    update_category(category, %{archived_at: DateTime.utc_now(:second)})
+  end
+
+  def unarchive_category(%Category{} = category),
+    do: update_category(category, %{archived_at: nil})
+
+  def merge_categories(%Category{id: source_id} = source, %Category{id: target_id})
+      when source_id != target_id do
+    Repo.transaction(fn ->
+      from(t in Transaction, where: t.category_id == ^source_id)
+      |> Repo.update_all(set: [category_id: target_id])
+
+      from(b in CashCadence.Budgets.RecurringBill, where: b.category_id == ^source_id)
+      |> Repo.update_all(set: [category_id: target_id])
+
+      case archive_category(source) do
+        {:ok, _} -> get_category!(target_id)
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  def category_stats(opts \\ []) do
+    bills =
+      Repo.all(
+        from b in CashCadence.Budgets.RecurringBill, where: b.active, select: b.category_id
+      )
+      |> MapSet.new()
+
+    Category
+    |> maybe_archived(opts[:archived])
+    |> maybe_kind(opts[:kind])
+    |> join(:left, [c], t in Transaction, on: t.category_id == c.id and is_nil(t.deleted_at))
+    |> group_by([c], c.id)
+    |> select([c, t], %{
+      category: c,
+      count: count(t.id),
+      expense_total: coalesce(sum(t.amount) |> filter(t.kind == :expense), 0),
+      income_total: coalesce(sum(t.amount) |> filter(t.kind == :income), 0),
+      first_competence: min(t.competence),
+      last_competence: max(t.competence),
+      last_date: max(t.date)
+    })
+    |> Repo.all()
+    |> Enum.map(fn row ->
+      total = Decimal.add(row.expense_total, row.income_total)
+      months = months_span(row.first_competence, row.last_competence)
+
+      row
+      |> Map.put(:total, total)
+      |> Map.put(
+        :monthly_average,
+        if(months > 0, do: Decimal.div(total, months) |> Decimal.round(2), else: Money.zero())
+      )
+      |> Map.put(:has_bill?, MapSet.member?(bills, row.category.id))
+    end)
+    |> Enum.sort_by(&Decimal.to_float(&1.total), :desc)
+  end
+
+  defp months_span(nil, _), do: 0
+
+  defp months_span(%Date{} = first, %Date{} = last),
+    do: (last.year - first.year) * 12 + (last.month - first.month) + 1
 
   def get_category!(id), do: Repo.get!(Category, id)
 
@@ -191,6 +260,12 @@ defmodule CashCadence.Ledger do
     |> Repo.all()
   end
 
+  def count_uncategorized do
+    active_transactions()
+    |> where([t], is_nil(t.category_id) and t.kind != :transfer)
+    |> Repo.aggregate(:count)
+  end
+
   def count_uncategorized(%Date{} = competence) do
     active_transactions()
     |> where(
@@ -199,6 +274,79 @@ defmodule CashCadence.Ledger do
         t.kind != :transfer
     )
     |> Repo.aggregate(:count)
+  end
+
+  def category_month_matrix(%Date{} = from, %Date{} = to, limit \\ 12) do
+    from = Date.beginning_of_month(from)
+    to = Date.beginning_of_month(to)
+    months = months_until(from, to)
+
+    rows =
+      Repo.all(
+        from t in active_transactions(),
+          left_join: c in assoc(t, :category),
+          where: t.competence >= ^from and t.competence <= ^to and t.kind == :expense,
+          group_by: [c.id, c.name, t.competence],
+          select: %{
+            category_id: c.id,
+            name: c.name,
+            competence: t.competence,
+            total: sum(t.amount)
+          }
+      )
+
+    rows
+    |> Enum.group_by(&{&1.category_id, &1.name})
+    |> Enum.map(fn {{category_id, name}, cells} ->
+      totals = Map.new(cells, &{&1.competence, &1.total})
+      total = cells |> Enum.map(& &1.total) |> Money.sum()
+
+      %{
+        category_id: category_id,
+        name: name || "Sem categoria",
+        totals: totals,
+        total: total,
+        average: Decimal.div(total, length(months)) |> Decimal.round(2)
+      }
+    end)
+    |> Enum.sort_by(&Decimal.to_float(&1.total), :desc)
+    |> Enum.take(limit)
+    |> then(&%{months: months, rows: &1})
+  end
+
+  def income_by_category(%Date{} = from, %Date{} = to) do
+    rows =
+      Repo.all(
+        from t in active_transactions(),
+          left_join: c in assoc(t, :category),
+          where:
+            t.competence >= ^Date.beginning_of_month(from) and
+              t.competence <= ^Date.beginning_of_month(to) and t.kind == :income,
+          group_by: [c.id, c.name, c.kind],
+          order_by: [desc: sum(t.amount)],
+          select: %{
+            category_id: c.id,
+            name: c.name,
+            kind: c.kind,
+            total: sum(t.amount),
+            count: count(t.id)
+          }
+      )
+
+    total = rows |> Enum.map(& &1.total) |> Money.sum()
+    Enum.map(rows, &Map.put(&1, :share, Money.ratio(&1.total, total)))
+  end
+
+  def export_rows(%Date{} = from, %Date{} = to) do
+    active_transactions()
+    |> where(
+      [t],
+      t.competence >= ^Date.beginning_of_month(from) and
+        t.competence <= ^Date.beginning_of_month(to)
+    )
+    |> order_by([t], asc: t.date, asc: t.id)
+    |> preload([:category, :bank_account])
+    |> Repo.all()
   end
 
   def months_with_data do
