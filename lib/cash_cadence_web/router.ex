@@ -45,12 +45,14 @@ defmodule CashCadenceWeb.Router do
     pipe_through [:browser, :require_authenticated_user]
 
     live_session :require_authenticated_user,
-      on_mount: [{CashCadenceWeb.UserAuth, :require_authenticated}] do
+      on_mount: [{CashCadenceWeb.UserAuth, :require_authenticated}, CashCadenceWeb.InboxCount] do
       live "/", MonthLive, :index
       live "/lancamentos", TransactionLive.Index, :index
       live "/fixas", BillLive.Index, :index
       live "/categorias", CategoryLive.Index, :index
       live "/relatorios", ReportLive, :index
+      live "/importar", ImportLive, :index
+      live "/entrada", InboxLive, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

@@ -183,6 +183,7 @@ defmodule CashCadenceWeb.UIComponents do
   attr :navigate, :string, required: true
   attr :icon, :string, required: true
   attr :active, :boolean, default: false
+  attr :badge, :integer, default: nil
   slot :inner_block, required: true
 
   def tab_link(assigns) do
@@ -190,7 +191,7 @@ defmodule CashCadenceWeb.UIComponents do
     <.link
       navigate={@navigate}
       class={[
-        "flex min-h-12 w-16 flex-col items-center gap-0.5 pt-1 text-[11px] font-medium",
+        "relative flex min-h-12 w-16 flex-col items-center gap-0.5 pt-1 text-[11px] font-medium",
         @active && "text-primary",
         !@active && "text-base-content/60"
       ]}
@@ -198,6 +199,7 @@ defmodule CashCadenceWeb.UIComponents do
     >
       <.icon name={@icon} class="size-5" />
       {render_slot(@inner_block)}
+      <span :if={@badge && @badge > 0} class="badge badge-primary badge-xs absolute right-1 top-0">{@badge}</span>
     </.link>
     """
   end

@@ -32,6 +32,7 @@ defmodule CashCadenceWeb.Layouts do
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
   attr :nav, :atom, default: nil
+  attr :inbox_count, :integer, default: nil
 
   slot :inner_block, required: true
 
@@ -66,9 +67,16 @@ defmodule CashCadenceWeb.Layouts do
           >
             Lançamentos
           </.nav_link>
+          <.nav_link navigate={~p"/entrada"} icon="hero-inbox" active={@nav == :inbox}>
+            Caixa de entrada
+            <span :if={@inbox_count && @inbox_count > 0} class="badge badge-primary badge-sm ml-auto">
+              {@inbox_count}
+            </span>
+          </.nav_link>
           <.nav_link navigate={~p"/fixas"} icon="hero-arrow-path" active={@nav == :bills}>Despesas fixas</.nav_link>
           <.nav_link navigate={~p"/categorias"} icon="hero-tag" active={@nav == :categories}>Categorias</.nav_link>
           <.nav_link navigate={~p"/relatorios"} icon="hero-chart-bar" active={@nav == :reports}>Relatórios</.nav_link>
+          <.nav_link navigate={~p"/importar"} icon="hero-arrow-up-tray" active={@nav == :import}>Importar</.nav_link>
         </nav>
         <div class="mt-auto flex flex-col gap-3 border-t border-base-300 pt-4">
           <div class="flex items-center justify-between gap-2 px-1">
@@ -91,11 +99,25 @@ defmodule CashCadenceWeb.Layouts do
           </.link>
           <nav class="ml-auto flex items-center gap-1 text-sm">
             <.link
+              navigate={~p"/relatorios"}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Relatórios"
+            >
+              <.icon name="hero-chart-bar" class="size-5" />
+            </.link>
+            <.link
               navigate={~p"/categorias"}
               class="btn btn-ghost btn-sm btn-square"
               aria-label="Categorias"
             >
               <.icon name="hero-tag" class="size-5" />
+            </.link>
+            <.link
+              navigate={~p"/importar"}
+              class="btn btn-ghost btn-sm btn-square"
+              aria-label="Importar"
+            >
+              <.icon name="hero-arrow-up-tray" class="size-5" />
             </.link>
             <.link
               href={~p"/users/settings"}
@@ -126,8 +148,13 @@ defmodule CashCadenceWeb.Layouts do
         >
           <.icon name="hero-plus" class="size-6" />
         </.link>
+        <.tab_link
+          navigate={~p"/entrada"}
+          icon="hero-inbox"
+          active={@nav == :inbox}
+          badge={@inbox_count}
+        >Entrada</.tab_link>
         <.tab_link navigate={~p"/fixas"} icon="hero-arrow-path" active={@nav == :bills}>Fixas</.tab_link>
-        <.tab_link navigate={~p"/relatorios"} icon="hero-chart-bar" active={@nav == :reports}>Relatórios</.tab_link>
       </nav>
     </div>
 

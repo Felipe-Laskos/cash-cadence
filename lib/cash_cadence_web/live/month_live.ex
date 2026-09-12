@@ -126,7 +126,7 @@ defmodule CashCadenceWeb.MonthLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} nav={:month}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} nav={:month} inbox_count={@inbox_count}>
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 class="text-3xl font-bold tracking-tight">{month_title(@month)}</h1>
