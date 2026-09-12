@@ -38,3 +38,5 @@ mix cash.import_sheet
 ```
 
 O primeiro acesso cria a única conta em `/users/register`; depois disso o cadastro fecha.
+
+No celular, o app pode ser instalado como PWA ("Adicionar à tela inicial").
