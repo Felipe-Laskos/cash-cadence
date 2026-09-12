@@ -9,13 +9,14 @@ defmodule CashCadence.Ledger.BankAccount do
     field :bank, Ecto.Enum, values: [:itau, :nubank, :other]
     field :kind, Ecto.Enum, values: [:checking, :credit_card, :other]
     field :own, :boolean, default: true
+    field :external_ref, :string
 
     timestamps(type: :utc_datetime)
   end
 
   def changeset(bank_account, attrs) do
     bank_account
-    |> cast(attrs, [:name, :bank, :kind, :own])
+    |> cast(attrs, [:name, :bank, :kind, :own, :external_ref])
     |> validate_required([:name, :bank, :kind])
     |> validate_length(:name, max: 60)
     |> unique_constraint(:name)

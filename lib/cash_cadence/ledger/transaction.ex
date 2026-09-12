@@ -17,6 +17,8 @@ defmodule CashCadence.Ledger.Transaction do
     field :amount, :decimal
     field :description, :string
     field :raw_description, :string
+    field :normalized_description, :string
+    field :posted_on, :date
     field :source, Ecto.Enum, values: @sources, default: :manual
     field :external_id, :string
     field :fingerprint, :string
@@ -26,6 +28,7 @@ defmodule CashCadence.Ledger.Transaction do
     belongs_to :category, Category
     belongs_to :bank_account, BankAccount
     belongs_to :reimbursement_of, __MODULE__
+    belongs_to :import_batch, CashCadence.Imports.Batch
 
     timestamps(type: :utc_datetime)
   end
@@ -41,6 +44,9 @@ defmodule CashCadence.Ledger.Transaction do
       :amount,
       :description,
       :raw_description,
+      :normalized_description,
+      :posted_on,
+      :import_batch_id,
       :source,
       :external_id,
       :fingerprint,

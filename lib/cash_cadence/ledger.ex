@@ -349,6 +349,61 @@ defmodule CashCadence.Ledger do
     |> Repo.all()
   end
 
+  def suggest_category(normalized) when is_binary(normalized) and normalized != "" do
+    Repo.one(
+      from t in active_transactions(),
+        where: t.normalized_description == ^normalized and not is_nil(t.category_id),
+        group_by: t.category_id,
+        order_by: [desc: count(t.id), desc: max(t.date)],
+        select: {t.category_id, count(t.id)},
+        limit: 1
+    )
+  end
+
+  def suggest_category(_), do: nil
+
+  def find_manual_match(kind, %Decimal{} = amount, %Date{} = date, window_days) do
+    from_date = Date.add(date, -window_days)
+    to_date = Date.add(date, window_days)
+
+    Repo.one(
+      from t in active_transactions(),
+        where:
+          t.kind == ^kind and t.amount == ^amount and is_nil(t.external_id) and
+            t.date >= ^from_date and t.date <= ^to_date,
+        order_by: [asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id],
+        limit: 1,
+        preload: :category
+    )
+  end
+
+  def find_transfer_counterpart(%Decimal{} = amount, %Date{} = date, account_id, window_days) do
+    from_date = Date.add(date, -window_days)
+    to_date = Date.add(date, window_days)
+
+    active_transactions()
+    |> where([t], t.amount == ^amount and t.date >= ^from_date and t.date <= ^to_date)
+    |> counterpart_scope(account_id)
+    |> order_by([t], asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id)
+    |> limit(1)
+    |> preload(:category)
+    |> Repo.one()
+  end
+
+  defp counterpart_scope(query, nil), do: where(query, [t], t.kind == :transfer)
+
+  defp counterpart_scope(query, account_id) do
+    where(
+      query,
+      [t],
+      t.kind == :transfer or (not is_nil(t.bank_account_id) and t.bank_account_id != ^account_id)
+    )
+  end
+
+  def attach_import(%Transaction{} = transaction, attrs) do
+    transaction |> Transaction.changeset(attrs) |> Repo.update()
+  end
+
   def months_with_data do
     Repo.all(
       from t in active_transactions(),
