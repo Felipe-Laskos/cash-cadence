@@ -38,6 +38,8 @@ defmodule CashCadence.Ledger do
       from(b in CashCadence.Budgets.RecurringBill, where: b.category_id == ^source_id)
       |> Repo.update_all(set: [category_id: target_id])
 
+      CashCadence.Classifier.remap_memory(source_id, target_id)
+
       case archive_category(source) do
         {:ok, _} -> get_category!(target_id)
         {:error, changeset} -> Repo.rollback(changeset)
@@ -128,8 +130,21 @@ defmodule CashCadence.Ledger do
 
   def get_bank_account_by_name(name), do: Repo.get_by(BankAccount, name: name)
 
+  def get_bank_account!(id), do: Repo.get!(BankAccount, id)
+
+  def change_bank_account(%BankAccount{} = account, attrs \\ %{}),
+    do: BankAccount.changeset(account, attrs)
+
   def create_bank_account(attrs),
     do: %BankAccount{} |> BankAccount.changeset(attrs) |> Repo.insert()
+
+  def update_bank_account(%BankAccount{} = account, attrs),
+    do: account |> BankAccount.changeset(attrs) |> Repo.update()
+
+  def delete_bank_account(%BankAccount{} = account), do: Repo.delete(account)
+
+  def forget_bank_account_ref(%BankAccount{} = account),
+    do: account |> Ecto.Changeset.change(external_ref: nil) |> Repo.update()
 
   def list_transactions(filters \\ %{}) do
     active_transactions()
@@ -348,19 +363,6 @@ defmodule CashCadence.Ledger do
     |> preload([:category, :bank_account])
     |> Repo.all()
   end
-
-  def suggest_category(normalized) when is_binary(normalized) and normalized != "" do
-    Repo.one(
-      from t in active_transactions(),
-        where: t.normalized_description == ^normalized and not is_nil(t.category_id),
-        group_by: t.category_id,
-        order_by: [desc: count(t.id), desc: max(t.date)],
-        select: {t.category_id, count(t.id)},
-        limit: 1
-    )
-  end
-
-  def suggest_category(_), do: nil
 
   def find_manual_match(kind, %Decimal{} = amount, %Date{} = date, window_days) do
     from_date = Date.add(date, -window_days)

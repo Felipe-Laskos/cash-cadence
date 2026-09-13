@@ -3,7 +3,7 @@ defmodule CashCadence.ImportsTest do
 
   import CashCadence.LedgerFixtures
 
-  alias CashCadence.{Imports, Ledger}
+  alias CashCadence.{Classifier, Imports, Ledger}
 
   @fixtures Path.expand("../support/fixtures/imports", __DIR__)
 
@@ -81,19 +81,8 @@ defmodule CashCadence.ImportsTest do
           description: "Padaria"
         })
 
-      transaction_fixture(%{
-        date: ~D[2026-04-22],
-        amount: "10.00",
-        category_id: food.id,
-        normalized_description: "COMPRA NO DEBITO PADARIA EXEMPLO"
-      })
-
-      transaction_fixture(%{
-        date: ~D[2026-03-22],
-        amount: "12.00",
-        category_id: food.id,
-        normalized_description: "COMPRA NO DEBITO PADARIA EXEMPLO"
-      })
+      :ok = Classifier.learn("COMPRA NO DEBITO PADARIA EXEMPLO", food.id)
+      :ok = Classifier.learn("COMPRA NO DEBITO PADARIA EXEMPLO", food.id)
 
       assert {:ok, batch} = Imports.ingest_file(fixture("nubank_conta.ofx"))
       assert batch.counts["matched"] == 1
@@ -195,19 +184,8 @@ defmodule CashCadence.ImportsTest do
   test "approve_high_confidence approves only confident items without flags" do
     food = category_fixture(%{name: "Comida"})
 
-    transaction_fixture(%{
-      date: ~D[2026-04-22],
-      amount: "10.00",
-      category_id: food.id,
-      normalized_description: "COMPRA NO DEBITO PADARIA EXEMPLO"
-    })
-
-    transaction_fixture(%{
-      date: ~D[2026-03-22],
-      amount: "12.00",
-      category_id: food.id,
-      normalized_description: "COMPRA NO DEBITO PADARIA EXEMPLO"
-    })
+    :ok = Classifier.learn("COMPRA NO DEBITO PADARIA EXEMPLO", food.id)
+    :ok = Classifier.learn("COMPRA NO DEBITO PADARIA EXEMPLO", food.id)
 
     assert {:ok, _batch} = Imports.ingest_file(fixture("nubank_conta.ofx"))
     assert Imports.approve_high_confidence() == 1

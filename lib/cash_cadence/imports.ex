@@ -3,6 +3,7 @@ defmodule CashCadence.Imports do
 
   import Ecto.Query, warn: false
 
+  alias CashCadence.Classifier
   alias CashCadence.Imports.{Batch, InboxItem, Normalizer, Sniffer}
   alias CashCadence.Ledger
   alias CashCadence.Ledger.{BankAccount, Transaction}
@@ -77,6 +78,7 @@ defmodule CashCadence.Imports do
       item = build_item(raw, batch, account)
       Repo.insert!(InboxItem.changeset(%InboxItem{}, item))
       mark_counterpart(item.payload["counterpart_item_id"])
+      Classifier.record_hit(item.payload["rule_id"])
 
       counts
       |> Map.update!("new", &(&1 + 1))
@@ -98,12 +100,14 @@ defmodule CashCadence.Imports do
   end
 
   defp build_item(raw, batch, account) do
-    account_id = account && account.id
+    account_id = id_of(account)
     normalized = Normalizer.normalize(raw.raw_description)
     fingerprint = fingerprint(account_id, raw.date, raw.amount, normalized)
-    {suggested_category_id, confidence} = suggestion(normalized)
+    classification = classify(raw, normalized)
+    raw = %{raw | kind: classification.kind || raw.kind}
     match = find_match(raw)
     {kind, counterpart, counterpart_item} = transfer_link(raw, account_id)
+    transfer? = not is_nil(counterpart) or not is_nil(counterpart_item)
 
     %{
       batch_id: batch.id,
@@ -118,20 +122,81 @@ defmodule CashCadence.Imports do
       raw_description: raw.raw_description,
       normalized_description: normalized,
       description: raw.description || Normalizer.short_description(raw.raw_description),
-      suggested_category_id: suggested_category_id,
-      confidence: confidence,
-      match_transaction_id: match && match.id,
-      counterpart_transaction_id: counterpart && counterpart.id,
+      suggested_category_id: classification.category_id,
+      confidence: classification.confidence,
+      match_transaction_id: id_of(match),
+      counterpart_transaction_id: id_of(counterpart),
       flags:
-        flags(
-          match,
-          kind != raw.kind,
-          known_fingerprint?(fingerprint),
-          suggested_category_id,
-          kind
-        ),
-      payload: put_counterpart_item(raw.payload, counterpart_item)
+        flags(match, transfer?, known_fingerprint?(fingerprint), classification.category_id, kind),
+      payload:
+        raw.payload
+        |> put_counterpart_item(counterpart_item)
+        |> put_classification(classification)
     }
+  end
+
+  defp id_of(nil), do: nil
+  defp id_of(%{id: id}), do: id
+
+  defp classify(raw, normalized) do
+    Classifier.classify(%{
+      raw: raw.raw_description,
+      normalized: normalized,
+      hint: raw.payload["itau_category"]
+    })
+  end
+
+  defp put_classification(payload, %{source: nil, rule_id: rule_id}),
+    do: payload |> Map.delete("suggestion_source") |> put_rule_id(rule_id)
+
+  defp put_classification(payload, %{source: source, rule_id: rule_id}),
+    do: payload |> Map.put("suggestion_source", Atom.to_string(source)) |> put_rule_id(rule_id)
+
+  defp put_rule_id(payload, nil), do: Map.delete(payload, "rule_id")
+  defp put_rule_id(payload, rule_id), do: Map.put(payload, "rule_id", rule_id)
+
+  def reclassify_pending do
+    InboxItem
+    |> where([i], i.status == :pending)
+    |> Repo.all()
+    |> Enum.count(&reclassify_item/1)
+  end
+
+  defp reclassify_item(item) do
+    classification =
+      Classifier.classify(%{
+        raw: item.raw_description,
+        normalized: item.normalized_description,
+        hint: item.payload["itau_category"]
+      })
+
+    kind = reclassified_kind(item, classification)
+
+    changes = %{
+      suggested_category_id: classification.category_id,
+      confidence: classification.confidence,
+      kind: kind,
+      flags: uncategorized_flag(item.flags, classification.category_id, kind),
+      payload: put_classification(item.payload, classification)
+    }
+
+    changed? =
+      changes.suggested_category_id != item.suggested_category_id or
+        changes.confidence != item.confidence or changes.kind != item.kind
+
+    if changed?, do: item |> InboxItem.changeset(changes) |> Repo.update!()
+    changed?
+  end
+
+  defp reclassified_kind(item, classification) do
+    if "transfer" in item.flags or is_nil(classification.kind),
+      do: item.kind,
+      else: classification.kind
+  end
+
+  defp uncategorized_flag(flags, category_id, kind) do
+    flags = List.delete(flags, "uncategorized")
+    if is_nil(category_id) and kind != :transfer, do: flags ++ ["uncategorized"], else: flags
   end
 
   defp transfer_link(raw, account_id) do
@@ -195,16 +260,6 @@ defmodule CashCadence.Imports do
     ]
     |> Enum.filter(&elem(&1, 0))
     |> Enum.map(&elem(&1, 1))
-  end
-
-  defp suggestion(""), do: {nil, :none}
-
-  defp suggestion(normalized) do
-    case Ledger.suggest_category(normalized) do
-      {category_id, uses} when uses >= 2 -> {category_id, :high}
-      {category_id, _uses} -> {category_id, :medium}
-      nil -> {nil, :none}
-    end
   end
 
   def fingerprint(account_id, %Date{} = date, %Decimal{} = amount, normalized) do
@@ -314,6 +369,7 @@ defmodule CashCadence.Imports do
       case Ledger.create_transaction(transaction_attrs) do
         {:ok, transaction} ->
           finish(item, :approved, transaction)
+          Classifier.learn(item.normalized_description, transaction.category_id)
           transaction
 
         {:error, changeset} ->
@@ -346,6 +402,7 @@ defmodule CashCadence.Imports do
            }) do
         {:ok, transaction} ->
           finish(item, :merged, transaction)
+          Classifier.learn(item.normalized_description, transaction.category_id)
           transaction
 
         {:error, changeset} ->
