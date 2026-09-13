@@ -35,12 +35,12 @@ defmodule CashCadenceWeb.UIComponents do
     ~H"""
     <section class={["card border border-base-300 bg-base-100", @class]}>
       <div class="card-body gap-4 p-5">
-        <header class="flex items-start justify-between gap-4">
-          <div>
+        <header class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
             <h2 class="text-sm font-bold">{@title}</h2>
             <p :if={@subtitle} class="text-xs text-base-content/60">{@subtitle}</p>
           </div>
-          <div :if={@actions != []} class="flex items-center gap-2 text-sm">
+          <div :if={@actions != []} class="flex flex-wrap items-center gap-2 text-sm">
             {render_slot(@actions)}
           </div>
         </header>

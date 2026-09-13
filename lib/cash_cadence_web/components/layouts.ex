@@ -86,7 +86,12 @@ defmodule CashCadenceWeb.Layouts do
             <.theme_toggle />
           </div>
           <div class="flex items-center gap-1 px-1 text-sm">
-            <.link href={~p"/users/settings"} class="btn btn-ghost btn-sm">Configurações</.link>
+            <.link
+              navigate={~p"/configuracoes"}
+              class={["btn btn-ghost btn-sm", @nav == :settings && "btn-active"]}
+            >
+              Configurações
+            </.link>
             <.link href={~p"/users/log-out"} method="delete" class="btn btn-ghost btn-sm">Sair</.link>
           </div>
         </div>
@@ -120,7 +125,7 @@ defmodule CashCadenceWeb.Layouts do
               <.icon name="hero-arrow-up-tray" class="size-5" />
             </.link>
             <.link
-              href={~p"/users/settings"}
+              navigate={~p"/configuracoes"}
               class="btn btn-ghost btn-sm btn-square"
               aria-label="Configurações"
             >

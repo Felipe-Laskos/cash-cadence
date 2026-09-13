@@ -116,9 +116,17 @@ defmodule CashCadenceWeb.InboxLive do
 
   defp hint_label(_payload), do: nil
 
-  defp confidence_badge(:high), do: {:paid, "confiança alta"}
-  defp confidence_badge(:medium), do: {:warn, "confiança média"}
-  defp confidence_badge(_), do: nil
+  defp confidence_badge(%{confidence: :high} = item),
+    do: {:paid, "confiança alta" <> source(item)}
+
+  defp confidence_badge(%{confidence: :medium} = item),
+    do: {:warn, "confiança média" <> source(item)}
+
+  defp confidence_badge(_item), do: nil
+
+  defp source(%{payload: %{"suggestion_source" => "rule"}}), do: " · regra"
+  defp source(%{payload: %{"suggestion_source" => "memory"}}), do: " · memória"
+  defp source(_item), do: ""
 
   defp category_default(item) do
     (item.suggested_category && item.suggested_category.name) ||
@@ -243,11 +251,11 @@ defmodule CashCadenceWeb.InboxLive do
                   class="input input-sm w-56"
                 />
                 <.badge
-                  :if={confidence_badge(item.confidence)}
-                  kind={elem(confidence_badge(item.confidence), 0)}
+                  :if={confidence_badge(item)}
+                  kind={elem(confidence_badge(item), 0)}
                 >
                   <.icon name="hero-sparkles-micro" class="size-3" /> {elem(
-                    confidence_badge(item.confidence),
+                    confidence_badge(item),
                     1
                   )}
                 </.badge>
