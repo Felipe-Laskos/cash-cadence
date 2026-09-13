@@ -1,5 +1,5 @@
 defmodule CashCadenceWeb.ImportLiveTest do
-  use CashCadenceWeb.ConnCase, async: true
+  use CashCadenceWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
@@ -30,10 +30,10 @@ defmodule CashCadenceWeb.ImportLiveTest do
 
     view |> form("#import-form", %{account_id: ""}) |> render_submit()
     {path, flash} = assert_redirect(view)
-    assert path == ~p"/entrada"
+    [batch] = Imports.list_batches()
+    assert path == ~p"/entrada?#{%{"batch" => batch.id}}"
     assert flash["info"] =~ "1 arquivo lido, 3 itens novos"
 
-    [batch] = Imports.list_batches()
     assert batch.file_name == "nubank_conta.ofx"
     assert batch.source == :upload
   end
@@ -48,5 +48,37 @@ defmodule CashCadenceWeb.ImportLiveTest do
     html = view |> form("#import-form", %{account_id: ""}) |> render_submit()
     assert html =~ "já tinha sido importado"
     assert length(Imports.list_batches()) == 1
+  end
+
+  @tag :pdftotext
+  test "imports an Itaú PDF, reports warnings and shows the extracted text", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/importar")
+    upload(view, "itau_extrato_divergente.pdf")
+    view |> form("#import-form", %{account_id: ""}) |> render_submit()
+    {path, flash} = assert_redirect(view)
+
+    [batch] = Imports.list_batches()
+    assert path == ~p"/entrada?#{%{"batch" => batch.id}}"
+    assert flash["info"] =~ "7 itens novos"
+    assert flash["info"] =~ "1 alerta para conferir"
+
+    {:ok, view, html} = live(conn, ~p"/importar")
+    assert html =~ "Itaú · PDF conta"
+    assert has_element?(view, "#batch-#{batch.id} button", "1 alerta")
+
+    html = view |> element("#batch-#{batch.id} button", "1 alerta") |> render_click()
+    assert html =~ "Saldo de 20/05/2026 não bate"
+    assert has_element?(view, "#batch-detail pre", "SALDO DO DIA")
+
+    view |> element("#batch-detail .modal-action button", "Fechar") |> render_click()
+    refute has_element?(view, "#batch-detail")
+  end
+
+  test "explains PDFs it cannot read", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/importar")
+    upload(view, "outro.pdf")
+    html = view |> form("#import-form", %{account_id: ""}) |> render_submit()
+    assert html =~ "outro.pdf: PDF não reconhecido" or html =~ "outro.pdf: leitor de PDF"
+    assert Imports.list_batches() == []
   end
 end

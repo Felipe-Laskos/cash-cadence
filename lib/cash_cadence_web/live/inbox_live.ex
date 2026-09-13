@@ -103,9 +103,18 @@ defmodule CashCadenceWeb.InboxLive do
       end
 
     account = item.bank_account && item.bank_account.name
-    format = if item.batch.format == :ofx, do: "OFX", else: "CSV"
-    Enum.join(Enum.reject([bank, account, format], &is_nil/1), " · ")
+    Enum.join(Enum.reject([bank, account, format_label(item.batch.format)], &is_nil/1), " · ")
   end
+
+  defp format_label(:ofx), do: "OFX"
+  defp format_label(:csv), do: "CSV"
+  defp format_label(:pdf), do: "PDF"
+
+  defp hint_label(%{"itau_category" => category} = payload) do
+    Enum.join(Enum.reject([category, payload["city"]], &is_nil/1), " · ")
+  end
+
+  defp hint_label(_payload), do: nil
 
   defp confidence_badge(:high), do: {:paid, "confiança alta"}
   defp confidence_badge(:medium), do: {:warn, "confiança média"}
@@ -146,6 +155,34 @@ defmodule CashCadenceWeb.InboxLive do
           </button>
         </div>
       </div>
+
+      <div
+        :if={@batch && @batch.warnings != []}
+        class="alert alert-warning alert-soft items-start text-sm"
+      >
+        <.icon name="hero-exclamation-triangle-micro" class="mt-0.5 size-4" />
+        <div>
+          <p class="font-semibold">O arquivo não fechou por completo. Confira antes de aprovar:</p>
+          <ul class="mt-1 list-disc space-y-1 pl-4">
+            <li :for={warning <- @batch.warnings}>{warning}</li>
+          </ul>
+        </div>
+      </div>
+      <details
+        :if={@batch && @batch.raw_text}
+        class="collapse collapse-arrow border border-base-300 bg-base-100"
+      >
+        <summary class="collapse-title text-sm font-semibold">Texto extraído do arquivo</summary>
+        <div class="collapse-content">
+          <p class="mb-2 text-xs text-base-content/60">
+            É o que o leitor de PDF enxergou. Se faltou algo na lista abaixo, lance à mão em <.link
+              navigate={~p"/lancamentos"}
+              class="underline"
+            >Lançamentos</.link>.
+          </p>
+          <pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-relaxed">{@batch.raw_text}</pre>
+        </div>
+      </details>
 
       <div id="inbox" phx-update="stream" class="space-y-3">
         <div id="inbox-empty" class="hidden only:block">
@@ -217,6 +254,12 @@ defmodule CashCadenceWeb.InboxLive do
                 <.badge :if={"uncategorized" in item.flags} kind={:warn}>
                   sem categoria conhecida
                 </.badge>
+                <.badge :if={item.payload["installment"]} kind={:neutral}>
+                  parcela {item.payload["installment"]["number"]}/{item.payload["installment"]["of"]}
+                </.badge>
+                <.badge :if={hint_label(item.payload)} kind={:neutral}>
+                  Itaú: {hint_label(item.payload)}
+                </.badge>
               </div>
               <div :if={item.match_transaction} class="alert alert-info alert-soft py-2 text-sm">
                 <.icon name="hero-arrows-right-left-micro" class="size-4" />
@@ -233,6 +276,13 @@ defmodule CashCadenceWeb.InboxLive do
                 <span>Parece transferência: há um lançamento de {brl(
                   item.counterpart_transaction.amount
                 )} em {short_date(item.counterpart_transaction.date)} do outro lado.</span>
+              </div>
+              <div
+                :if={"transfer" in item.flags and is_nil(item.counterpart_transaction)}
+                class="alert alert-warning alert-soft py-2 text-sm"
+              >
+                <.icon name="hero-arrow-path-micro" class="size-4" />
+                <span>Parece transferência entre suas contas: o outro lado também está na caixa de entrada.</span>
               </div>
               <div
                 :if={"possible_duplicate" in item.flags}

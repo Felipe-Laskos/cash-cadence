@@ -1,5 +1,5 @@
 defmodule CashCadenceWeb.InboxLiveTest do
-  use CashCadenceWeb.ConnCase, async: true
+  use CashCadenceWeb.ConnCase, async: false
 
   import CashCadence.LedgerFixtures
   import Phoenix.LiveViewTest
@@ -87,5 +87,26 @@ defmodule CashCadenceWeb.InboxLiveTest do
       assert html =~ batch.file_name
       refute has_element?(view, "button", "com alta confiança")
     end
+  end
+
+  test "shows the batch warnings and the extracted text when filtering by batch", %{conn: conn} do
+    {:ok, batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
+
+    batch =
+      batch
+      |> Ecto.Changeset.change(
+        warnings: ["Saldo de 20/05/2026 não bate: o extrato mostra R$ 1,00."],
+        raw_text: "TEXTO BRUTO DO EXTRATO"
+      )
+      |> CashCadence.Repo.update!()
+
+    {:ok, view, html} = live(conn, ~p"/entrada?batch=#{batch.id}")
+    assert html =~ "O arquivo não fechou por completo"
+    assert html =~ "Saldo de 20/05/2026 não bate"
+    assert has_element?(view, "details summary", "Texto extraído do arquivo")
+    assert has_element?(view, "details pre", "TEXTO BRUTO DO EXTRATO")
+
+    {:ok, _view, html} = live(conn, ~p"/entrada")
+    refute html =~ "O arquivo não fechou por completo"
   end
 end

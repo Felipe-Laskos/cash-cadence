@@ -11,7 +11,8 @@ defmodule CashCadenceWeb.ImportLive do
         page_title: "Importar",
         accounts: Ledger.list_bank_accounts(),
         account_id: "",
-        batches: Imports.list_batches()
+        batches: Imports.list_batches(),
+        detail: nil
       )
       |> allow_upload(:files, accept: :any, max_entries: 10, max_file_size: 10_000_000)
 
@@ -25,6 +26,11 @@ defmodule CashCadenceWeb.ImportLive do
 
   def handle_event("cancel", %{"ref" => ref}, socket),
     do: {:noreply, cancel_upload(socket, :files, ref)}
+
+  def handle_event("show_batch", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, detail: Imports.get_batch!(id))}
+
+  def handle_event("close_detail", _params, socket), do: {:noreply, assign(socket, detail: nil)}
 
   def handle_event("import", params, socket) do
     account_id = parse_account(params["account_id"])
@@ -40,19 +46,24 @@ defmodule CashCadenceWeb.ImportLive do
       end)
 
     {imported, rest} = Enum.split_with(results, &match?({_, {:ok, _}}, &1))
-
-    new_items =
-      imported |> Enum.map(fn {_, {:ok, batch}} -> batch.counts["new"] end) |> Enum.sum()
+    batches = Enum.map(imported, fn {_, {:ok, batch}} -> batch end)
+    new_items = batches |> Enum.map(& &1.counts["new"]) |> Enum.sum()
+    warnings = batches |> Enum.map(&length(&1.warnings)) |> Enum.sum()
 
     socket =
       socket
       |> assign(batches: Imports.list_batches(), inbox_count: Imports.count_pending())
-      |> put_flash(flash_kind(imported, rest), summary(imported, rest, new_items))
+      |> put_flash(flash_kind(imported, rest), summary(imported, rest, new_items, warnings))
 
-    if new_items > 0 do
-      {:noreply, push_navigate(socket, to: ~p"/entrada")}
-    else
-      {:noreply, socket}
+    case batches do
+      [batch] when new_items > 0 ->
+        {:noreply, push_navigate(socket, to: ~p"/entrada?#{%{"batch" => batch.id}}")}
+
+      _ when new_items > 0 ->
+        {:noreply, push_navigate(socket, to: ~p"/entrada")}
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -63,18 +74,31 @@ defmodule CashCadenceWeb.ImportLive do
   defp flash_kind([], _rest), do: :error
   defp flash_kind(_imported, _rest), do: :info
 
-  defp summary(imported, rest, new_items) do
+  defp summary(imported, rest, new_items, warnings) do
     parts =
       [
         imported != [] &&
-          "#{length(imported)} #{plural(length(imported), "arquivo lido", "arquivos lidos")}, #{new_items} #{plural(new_items, "item novo", "itens novos")} na caixa de entrada"
+          "#{length(imported)} #{plural(length(imported), "arquivo lido", "arquivos lidos")}, #{new_items} #{plural(new_items, "item novo", "itens novos")} na caixa de entrada",
+        warnings > 0 && "#{warnings} #{plural(warnings, "alerta", "alertas")} para conferir"
       ] ++ Enum.map(rest, &failure/1)
 
     parts |> Enum.reject(&(&1 in [nil, false])) |> Enum.join(" · ")
   end
 
   defp failure({name, {:error, {:already_imported, _}}}), do: "#{name}: já tinha sido importado"
-  defp failure({name, {:error, :unknown_format}}), do: "#{name}: formato não reconhecido"
+
+  defp failure({name, {:error, :unknown_format}}),
+    do: "#{name}: formato não reconhecido (aceito OFX, CSV do Nubank e PDF do Itaú)"
+
+  defp failure({name, {:error, {:unknown_layout, _text}}}),
+    do: "#{name}: PDF não reconhecido, por enquanto só extrato e fatura do Itaú"
+
+  defp failure({name, {:error, :encrypted}}),
+    do: "#{name}: PDF protegido por senha, remova a senha e tente de novo"
+
+  defp failure({name, {:error, :pdftotext_missing}}),
+    do: "#{name}: leitor de PDF (pdftotext) não encontrado neste computador"
+
   defp failure({name, {:error, :no_transactions}}), do: "#{name}: nenhuma transação encontrada"
   defp failure({name, {:error, _}}), do: "#{name}: não foi possível ler"
 
@@ -82,12 +106,13 @@ defmodule CashCadenceWeb.ImportLive do
   defp plural(_, _singular, plural), do: plural
 
   defp upload_error(:too_large), do: "arquivo maior que 10 MB"
-  defp upload_error(:not_accepted), do: "só OFX e CSV"
+  defp upload_error(:not_accepted), do: "só OFX, CSV e PDF"
   defp upload_error(:too_many_files), do: "no máximo 10 arquivos por vez"
   defp upload_error(other), do: to_string(other)
 
   defp format_label(:ofx), do: "OFX"
   defp format_label(:csv), do: "CSV"
+  defp format_label(:pdf), do: "PDF"
 
   defp bank_label(:nubank), do: "Nubank"
   defp bank_label(:itau), do: "Itaú"
@@ -116,7 +141,7 @@ defmodule CashCadenceWeb.ImportLive do
       <div class="grid gap-4 xl:grid-cols-3">
         <.card
           title="Enviar arquivos"
-          subtitle="OFX de conta, CSV do Nubank (conta e cartão fechado)"
+          subtitle="OFX de conta, CSV do Nubank (conta e cartão fechado), PDF do Itaú (extrato e fatura)"
           class="xl:col-span-2"
         >
           <.form
@@ -191,7 +216,8 @@ defmodule CashCadenceWeb.ImportLive do
             </div>
           </.form>
           <p class="text-xs text-base-content/50">
-            Os arquivos são lidos e descartados; só o resumo do lote fica guardado. PDFs do Itaú entram na próxima etapa.
+            Os arquivos são lidos e descartados; fica guardado o resumo do lote e, para PDF, o texto extraído para conferência.
+            A leitura confere saldo por saldo e total da fatura: qualquer diferença vira alerta.
           </p>
         </.card>
 
@@ -202,7 +228,10 @@ defmodule CashCadenceWeb.ImportLive do
             </li>
             <li><b>Nubank cartão</b>: só faturas fechadas; abra a fatura → exportar → CSV.</li>
             <li>
-              <b>Itaú</b>: extrato e fatura em PDF pelo internet banking; leitura de PDF chega na próxima etapa.
+              <b>Itaú conta</b>: no app ou internet banking, Extrato → compartilhar/exportar → PDF.
+            </li>
+            <li>
+              <b>Itaú cartão</b>: Cartões → fatura fechada → PDF. Se o PDF pedir senha, salve uma cópia sem senha antes.
             </li>
           </ul>
         </.card>
@@ -248,17 +277,74 @@ defmodule CashCadenceWeb.ImportLive do
                     {if batch.status == :reviewed, do: "Revisado", else: "Pendente"}
                   </.badge>
                 </td>
-                <td class="text-right">
+                <td class="whitespace-nowrap text-right">
+                  <button
+                    :if={batch.warnings != []}
+                    type="button"
+                    phx-click="show_batch"
+                    phx-value-id={batch.id}
+                    class="btn btn-warning btn-soft btn-xs"
+                  >
+                    <.icon name="hero-exclamation-triangle-micro" class="size-3" />
+                    {length(batch.warnings)} {if length(batch.warnings) == 1,
+                      do: "alerta",
+                      else: "alertas"}
+                  </button>
+                  <button
+                    :if={batch.warnings == [] and batch.raw_text}
+                    type="button"
+                    phx-click="show_batch"
+                    phx-value-id={batch.id}
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Texto extraído
+                  </button>
                   <.link
                     :if={batch.status == :pending}
                     navigate={~p"/entrada?#{%{"batch" => batch.id}}"}
-                  >Ver na caixa de entrada</.link>
+                    class="btn btn-ghost btn-xs"
+                  >
+                    Ver na caixa de entrada
+                  </.link>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
       </.card>
+
+      <dialog
+        :if={@detail}
+        id="batch-detail"
+        class="modal modal-open"
+        phx-window-keydown="close_detail"
+        phx-key="escape"
+      >
+        <div class="modal-box max-w-4xl">
+          <h3 class="font-mono text-sm font-bold">{@detail.file_name}</h3>
+          <div
+            :if={@detail.warnings != []}
+            class="alert alert-warning alert-soft mt-3 items-start text-sm"
+          >
+            <.icon name="hero-exclamation-triangle-micro" class="mt-0.5 size-4" />
+            <ul class="list-disc space-y-1 pl-4">
+              <li :for={warning <- @detail.warnings}>{warning}</li>
+            </ul>
+          </div>
+          <p class="mt-3 text-sm text-base-content/60">
+            Texto extraído do arquivo, do jeito que o leitor de PDF enxergou. Se algo ficou de fora da caixa de entrada, é daqui que você lança à mão.
+          </p>
+          <pre
+            :if={@detail.raw_text}
+            class="mt-2 max-h-[60vh] overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-relaxed"
+          >{@detail.raw_text}</pre>
+          <div class="modal-action">
+            <.link navigate={~p"/lancamentos"} class="btn btn-ghost btn-sm">Lançar à mão</.link>
+            <button type="button" phx-click="close_detail" class="btn btn-sm">Fechar</button>
+          </div>
+        </div>
+        <button type="button" class="modal-backdrop" phx-click="close_detail" aria-label="Fechar"></button>
+      </dialog>
     </Layouts.app>
     """
   end
