@@ -6,6 +6,11 @@ defmodule CashCadence.Imports.Sniffer do
   @nubank_checking_header "Data,Valor,Identificador,Descrição"
   @nubank_card_header "date,category,title,amount"
 
+  def detect("%PDF-" <> _rest) do
+    {:ok,
+     %{format: :pdf, bank: :unknown, account_kind: nil, encoding: :binary, parser: Parsers.PDF}}
+  end
+
   def detect(binary) when is_binary(binary) do
     head = binary |> strip_bom() |> String.slice(0, 4000)
 

@@ -1,5 +1,5 @@
 defmodule CashCadence.ImportsTest do
-  use CashCadence.DataCase, async: true
+  use CashCadence.DataCase, async: false
 
   import CashCadence.LedgerFixtures
 

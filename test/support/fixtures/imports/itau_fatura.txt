@@ -1,0 +1,34 @@
+CLIENTE EXEMPLO
+RUA EXEMPLO, 100
+00000-000 CIDADE EXEMPLO UF
+
+Postagem: 30/05/2026
+Vencimento: 08/06/2026
+Emissão: 30/05/2026
+Previsão próx. Fechamento: 29/06/2026
+
+Titular CLIENTE EXEMPLO
+Cartão 5555.XXXX.XXXX.1234
+
+O total da sua fatura é:          Com vencimento em
+R$ 358,00                         08/06/2026
+
+Pagamentos efetuados
+ DATA                                   VALOR EM R$
+ 06/05 Pagamento via conta                  -150,00
+       P Total dos pagamentos               -150,00
+
+Lançamentos: compras e saques
+CLIENTE EXEMPLO
+DATA    ESTABELECIMENTO                 VALOR EM R$
+16/03   OficinaExemplo 03/03                 208,00
+        serviços CIDADE EXEMPLO
+07/05   ASSINATURAEXEMPLO                    150,00
+        serviços SAO PAULO
+        Lançamentos no cartão                358,00
+
+L Total dos lançamentos atuais              358,00
+
+Limites de crédito                      Valor em R$
+Limite total de crédito                    1.000,00
+

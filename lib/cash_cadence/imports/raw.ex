@@ -5,9 +5,11 @@ defmodule CashCadence.Imports.Raw do
   defstruct [
     :date,
     :posted_on,
+    :competence,
     :amount,
     :kind,
     :raw_description,
+    :description,
     :external_id,
     :account_ref,
     payload: %{}

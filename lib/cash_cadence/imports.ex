@@ -5,7 +5,7 @@ defmodule CashCadence.Imports do
 
   alias CashCadence.Imports.{Batch, InboxItem, Normalizer, Sniffer}
   alias CashCadence.Ledger
-  alias CashCadence.Ledger.Transaction
+  alias CashCadence.Ledger.{BankAccount, Transaction}
   alias CashCadence.Repo
 
   @match_window_days 3
@@ -22,7 +22,8 @@ defmodule CashCadence.Imports do
          {:ok, meta} <- Sniffer.detect(binary),
          decoded = binary |> Sniffer.strip_bom() |> Sniffer.transcode(meta.encoding),
          {:ok, parsed} <- meta.parser.parse(decoded) do
-      account = resolve_account(parsed.account.account_ref, opts[:bank_account_id])
+      bank = parsed[:bank] || meta.bank
+      account = resolve_account(parsed.account, opts[:bank_account_id], bank)
 
       Repo.transaction(fn ->
         batch =
@@ -30,13 +31,15 @@ defmodule CashCadence.Imports do
           |> Batch.changeset(%{
             source: Keyword.get(opts, :source, :upload),
             format: meta.format,
-            bank: meta.bank,
+            bank: bank,
             account_kind: parsed.account.kind || meta.account_kind,
             file_name: file_name,
             file_sha256: sha,
             period_start: parsed.period_start,
             period_end: parsed.period_end,
             statement_balance: parsed.balance,
+            raw_text: parsed[:raw_text],
+            warnings: parsed[:warnings] || [],
             bank_account_id: account && account.id
           })
           |> Repo.insert!()
@@ -73,6 +76,7 @@ defmodule CashCadence.Imports do
     else
       item = build_item(raw, batch, account)
       Repo.insert!(InboxItem.changeset(%InboxItem{}, item))
+      mark_counterpart(item.payload["counterpart_item_id"])
 
       counts
       |> Map.update!("new", &(&1 + 1))
@@ -99,11 +103,7 @@ defmodule CashCadence.Imports do
     fingerprint = fingerprint(account_id, raw.date, raw.amount, normalized)
     {suggested_category_id, confidence} = suggestion(normalized)
     match = find_match(raw)
-
-    counterpart =
-      Ledger.find_transfer_counterpart(raw.amount, raw.date, account_id, @transfer_window_days)
-
-    kind = if counterpart, do: :transfer, else: raw.kind
+    {kind, counterpart, counterpart_item} = transfer_link(raw, account_id)
 
     %{
       batch_id: batch.id,
@@ -112,20 +112,67 @@ defmodule CashCadence.Imports do
       fingerprint: fingerprint,
       posted_on: raw.posted_on || raw.date,
       date: raw.date,
-      competence: Date.beginning_of_month(raw.date),
+      competence: raw.competence || Date.beginning_of_month(raw.date),
       amount: raw.amount,
       kind: kind,
       raw_description: raw.raw_description,
       normalized_description: normalized,
-      description: Normalizer.short_description(raw.raw_description),
+      description: raw.description || Normalizer.short_description(raw.raw_description),
       suggested_category_id: suggested_category_id,
       confidence: confidence,
       match_transaction_id: match && match.id,
       counterpart_transaction_id: counterpart && counterpart.id,
       flags:
-        flags(match, counterpart, known_fingerprint?(fingerprint), suggested_category_id, kind),
-      payload: raw.payload
+        flags(
+          match,
+          kind != raw.kind,
+          known_fingerprint?(fingerprint),
+          suggested_category_id,
+          kind
+        ),
+      payload: put_counterpart_item(raw.payload, counterpart_item)
     }
+  end
+
+  defp transfer_link(raw, account_id) do
+    counterpart =
+      Ledger.find_transfer_counterpart(raw.amount, raw.date, account_id, @transfer_window_days)
+
+    counterpart_item = if is_nil(counterpart), do: find_pending_counterpart(raw, account_id)
+    kind = if counterpart || counterpart_item, do: :transfer, else: raw.kind
+    {kind, counterpart, counterpart_item}
+  end
+
+  defp find_pending_counterpart(%{kind: kind}, _account_id) when kind not in [:income, :expense],
+    do: nil
+
+  defp find_pending_counterpart(_raw, nil), do: nil
+
+  defp find_pending_counterpart(raw, account_id) do
+    opposite = if raw.kind == :expense, do: :income, else: :expense
+    from_date = Date.add(raw.date, -@transfer_window_days)
+    to_date = Date.add(raw.date, @transfer_window_days)
+
+    Repo.one(
+      from i in InboxItem,
+        where:
+          i.status == :pending and i.kind == ^opposite and i.amount == ^raw.amount and
+            i.date >= ^from_date and i.date <= ^to_date and
+            not is_nil(i.bank_account_id) and i.bank_account_id != ^account_id,
+        order_by: [asc: fragment("abs(? - ?)", i.date, type(^raw.date, :date)), asc: i.id],
+        limit: 1
+    )
+  end
+
+  defp put_counterpart_item(payload, nil), do: payload
+  defp put_counterpart_item(payload, item), do: Map.put(payload, "counterpart_item_id", item.id)
+
+  defp mark_counterpart(nil), do: :ok
+
+  defp mark_counterpart(item_id) do
+    item = Repo.get!(InboxItem, item_id)
+    flags = Enum.uniq(["transfer" | List.delete(item.flags, "uncategorized")])
+    item |> InboxItem.changeset(%{kind: :transfer, flags: flags}) |> Repo.update!()
   end
 
   defp find_match(%{kind: :transfer}), do: nil
@@ -139,10 +186,10 @@ defmodule CashCadence.Imports do
     )
   end
 
-  defp flags(match, counterpart, possible_duplicate?, suggested_category_id, kind) do
+  defp flags(match, transfer?, possible_duplicate?, suggested_category_id, kind) do
     [
       {match != nil, "match"},
-      {counterpart != nil, "transfer"},
+      {transfer?, "transfer"},
       {possible_duplicate?, "possible_duplicate"},
       {is_nil(suggested_category_id) and kind != :transfer, "uncategorized"}
     ]
@@ -168,20 +215,35 @@ defmodule CashCadence.Imports do
     |> Base.encode16(case: :lower)
   end
 
-  defp resolve_account(account_ref, nil) when is_binary(account_ref),
-    do: Repo.get_by(CashCadence.Ledger.BankAccount, external_ref: account_ref)
+  defp resolve_account(%{account_ref: ref} = account, nil, bank) when is_binary(ref) do
+    Repo.get_by(BankAccount, external_ref: ref) || default_account(ref, bank, account[:kind])
+  end
 
-  defp resolve_account(_account_ref, nil), do: nil
+  defp resolve_account(_account, nil, _bank), do: nil
 
-  defp resolve_account(account_ref, account_id) do
-    account = Repo.get!(CashCadence.Ledger.BankAccount, account_id)
+  defp resolve_account(%{account_ref: ref}, account_id, _bank),
+    do: remember_ref(Repo.get!(BankAccount, account_id), ref)
 
-    if is_binary(account_ref) and is_nil(account.external_ref) do
-      account |> Ecto.Changeset.change(external_ref: account_ref) |> Repo.update!()
-    else
-      account
+  defp default_account(ref, bank, kind)
+       when bank in [:itau, :nubank] and kind in [:checking, :credit_card] do
+    candidates =
+      Repo.all(
+        from a in BankAccount,
+          where: a.bank == ^bank and a.kind == ^kind and a.own == true and is_nil(a.external_ref)
+      )
+
+    case candidates do
+      [account] -> remember_ref(account, ref)
+      _ -> nil
     end
   end
+
+  defp default_account(_ref, _bank, _kind), do: nil
+
+  defp remember_ref(%BankAccount{external_ref: nil} = account, ref) when is_binary(ref),
+    do: account |> Ecto.Changeset.change(external_ref: ref) |> Repo.update!()
+
+  defp remember_ref(account, _ref), do: account
 
   def list_batches(limit \\ 20) do
     Repo.all(
@@ -234,6 +296,7 @@ defmodule CashCadence.Imports do
         %{
           "date" => item.date,
           "kind" => Map.get(attrs, "kind", Atom.to_string(item.kind)),
+          "competence" => item.competence,
           "amount" => item.amount,
           "description" => Map.get(attrs, "description", item.description),
           "category_id" => item.suggested_category_id,
