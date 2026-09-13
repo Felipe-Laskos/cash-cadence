@@ -30,6 +30,7 @@ defmodule CashCadenceWeb.SettingsLive do
   ]
   @banks [{"Itaú", "itau"}, {"Nubank", "nubank"}, {"Outro", "other"}]
   @account_kinds [{"Conta", "checking"}, {"Cartão de crédito", "credit_card"}, {"Outro", "other"}]
+  @competence_modes [{"data da compra", "purchase_date"}, {"mês da fatura", "statement_month"}]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -41,7 +42,8 @@ defmodule CashCadenceWeb.SettingsLive do
        targets: @targets,
        kind_overrides: @kind_overrides,
        banks: @banks,
-       account_kinds: @account_kinds
+       account_kinds: @account_kinds,
+       competence_modes: @competence_modes
      )}
   end
 
@@ -294,7 +296,7 @@ defmodule CashCadenceWeb.SettingsLive do
             id="account-form"
             phx-change="validate_account"
             phx-submit="save_account"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[1fr_10rem_12rem_auto_auto] md:items-end"
+            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[1fr_9rem_11rem_11rem_auto_auto] md:items-end"
           >
             <.input
               field={@account_form[:name]}
@@ -305,6 +307,12 @@ defmodule CashCadenceWeb.SettingsLive do
             />
             <.input field={@account_form[:bank]} type="select" label="Banco" options={@banks} />
             <.input field={@account_form[:kind]} type="select" label="Tipo" options={@account_kinds} />
+            <.input
+              field={@account_form[:competence_mode]}
+              type="select"
+              label="Competência (cartão)"
+              options={@competence_modes}
+            />
             <.input field={@account_form[:own]} type="checkbox" label="É minha" />
             <div class="flex gap-1">
               <.button variant="primary" phx-disable-with="Salvando…">
@@ -323,6 +331,7 @@ defmodule CashCadenceWeb.SettingsLive do
                   <th>Nome</th>
                   <th>Banco</th>
                   <th>Tipo</th>
+                  <th>Competência</th>
                   <th>Vínculo com arquivo</th>
                   <th></th>
                 </tr>
@@ -332,6 +341,11 @@ defmodule CashCadenceWeb.SettingsLive do
                   <td class="font-medium">{account.name}</td>
                   <td>{label(@banks, account.bank)}</td>
                   <td>{label(@account_kinds, account.kind)}</td>
+                  <td class="text-base-content/70">
+                    {if account.kind == :credit_card,
+                      do: label(@competence_modes, account.competence_mode),
+                      else: "—"}
+                  </td>
                   <td>
                     <span :if={account.external_ref} class="font-mono text-xs">{account.external_ref}</span>
                     <button

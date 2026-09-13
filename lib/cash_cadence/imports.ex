@@ -3,7 +3,7 @@ defmodule CashCadence.Imports do
 
   import Ecto.Query, warn: false
 
-  alias CashCadence.Classifier
+  alias CashCadence.{Budgets, Classifier}
   alias CashCadence.Imports.{Batch, InboxItem, Normalizer, Sniffer}
   alias CashCadence.Ledger
   alias CashCadence.Ledger.{BankAccount, Transaction}
@@ -25,6 +25,7 @@ defmodule CashCadence.Imports do
          {:ok, parsed} <- meta.parser.parse(decoded) do
       bank = parsed[:bank] || meta.bank
       account = resolve_account(parsed.account, opts[:bank_account_id], bank)
+      statement_competence = statement_competence(parsed, account)
 
       Repo.transaction(fn ->
         batch =
@@ -46,7 +47,11 @@ defmodule CashCadence.Imports do
           |> Repo.insert!()
 
         counts =
-          Enum.reduce(parsed.transactions, empty_counts(), &ingest_raw(&1, batch, account, &2))
+          Enum.reduce(
+            parsed.transactions,
+            empty_counts(),
+            &ingest_raw(&1, batch, account, statement_competence, &2)
+          )
 
         batch
         |> Ecto.Changeset.change(counts: counts)
@@ -69,13 +74,13 @@ defmodule CashCadence.Imports do
       "suggested" => 0
     }
 
-  defp ingest_raw(raw, batch, account, counts) do
+  defp ingest_raw(raw, batch, account, statement_competence, counts) do
     counts = Map.update!(counts, "total", &(&1 + 1))
 
     if duplicate?(raw) do
       Map.update!(counts, "duplicates", &(&1 + 1))
     else
-      item = build_item(raw, batch, account)
+      item = build_item(raw, batch, account, statement_competence)
       Repo.insert!(InboxItem.changeset(%InboxItem{}, item))
       mark_counterpart(item.payload["counterpart_item_id"])
       Classifier.record_hit(item.payload["rule_id"])
@@ -99,12 +104,19 @@ defmodule CashCadence.Imports do
       )
   end
 
-  defp build_item(raw, batch, account) do
+  defp build_item(raw, batch, account, statement_competence) do
     account_id = id_of(account)
     normalized = Normalizer.normalize(raw.raw_description)
     fingerprint = fingerprint(account_id, raw.date, raw.amount, normalized)
     classification = classify(raw, normalized)
-    raw = %{raw | kind: classification.kind || raw.kind}
+
+    raw = %{
+      raw
+      | kind: classification.kind || raw.kind,
+        competence: statement_competence || raw.competence || Date.beginning_of_month(raw.date)
+    }
+
+    suggestion = with_bill_fallback(classification, raw, normalized)
     match = find_match(raw)
     {kind, counterpart, counterpart_item} = transfer_link(raw, account_id)
     transfer? = not is_nil(counterpart) or not is_nil(counterpart_item)
@@ -116,24 +128,53 @@ defmodule CashCadence.Imports do
       fingerprint: fingerprint,
       posted_on: raw.posted_on || raw.date,
       date: raw.date,
-      competence: raw.competence || Date.beginning_of_month(raw.date),
+      competence: raw.competence,
       amount: raw.amount,
       kind: kind,
       raw_description: raw.raw_description,
       normalized_description: normalized,
       description: raw.description || Normalizer.short_description(raw.raw_description),
-      suggested_category_id: classification.category_id,
-      confidence: classification.confidence,
+      suggested_category_id: suggestion.category_id,
+      confidence: suggestion.confidence,
       match_transaction_id: id_of(match),
       counterpart_transaction_id: id_of(counterpart),
       flags:
-        flags(match, transfer?, known_fingerprint?(fingerprint), classification.category_id, kind),
+        flags(match, transfer?, known_fingerprint?(fingerprint), suggestion.category_id, kind),
       payload:
         raw.payload
         |> put_counterpart_item(counterpart_item)
-        |> put_classification(classification)
+        |> put_classification(suggestion)
     }
   end
+
+  defp statement_competence(parsed, %BankAccount{
+         kind: :credit_card,
+         competence_mode: :statement_month
+       }) do
+    case parsed[:due_on] || parsed[:period_end] do
+      %Date{} = date -> Date.beginning_of_month(date)
+      _ -> nil
+    end
+  end
+
+  defp statement_competence(_parsed, _account), do: nil
+
+  defp with_bill_fallback(%{category_id: nil} = classification, subject, normalized) do
+    case Budgets.find_bill_match(subject.kind, subject.amount, subject.competence, normalized) do
+      nil ->
+        classification
+
+      %{bill: bill, strong?: strong?} ->
+        Map.merge(classification, %{
+          category_id: bill.category_id,
+          confidence: if(strong?, do: :high, else: :medium),
+          source: :bill,
+          bill: bill
+        })
+    end
+  end
+
+  defp with_bill_fallback(classification, _subject, _normalized), do: classification
 
   defp id_of(nil), do: nil
   defp id_of(%{id: id}), do: id
@@ -146,14 +187,19 @@ defmodule CashCadence.Imports do
     })
   end
 
-  defp put_classification(payload, %{source: nil, rule_id: rule_id}),
-    do: payload |> Map.delete("suggestion_source") |> put_rule_id(rule_id)
+  defp put_classification(payload, classification) do
+    source = classification.source
+    bill = classification[:bill]
 
-  defp put_classification(payload, %{source: source, rule_id: rule_id}),
-    do: payload |> Map.put("suggestion_source", Atom.to_string(source)) |> put_rule_id(rule_id)
+    payload
+    |> put_or_delete("suggestion_source", source && Atom.to_string(source))
+    |> put_or_delete("rule_id", classification[:rule_id])
+    |> put_or_delete("bill_id", bill && bill.id)
+    |> put_or_delete("bill_name", bill && bill.name)
+  end
 
-  defp put_rule_id(payload, nil), do: Map.delete(payload, "rule_id")
-  defp put_rule_id(payload, rule_id), do: Map.put(payload, "rule_id", rule_id)
+  defp put_or_delete(map, key, nil), do: Map.delete(map, key)
+  defp put_or_delete(map, key, value), do: Map.put(map, key, value)
 
   def reclassify_pending do
     InboxItem
@@ -172,12 +218,19 @@ defmodule CashCadence.Imports do
 
     kind = reclassified_kind(item, classification)
 
+    suggestion =
+      with_bill_fallback(
+        classification,
+        %{kind: kind, amount: item.amount, competence: item.competence},
+        item.normalized_description
+      )
+
     changes = %{
-      suggested_category_id: classification.category_id,
-      confidence: classification.confidence,
+      suggested_category_id: suggestion.category_id,
+      confidence: suggestion.confidence,
       kind: kind,
-      flags: uncategorized_flag(item.flags, classification.category_id, kind),
-      payload: put_classification(item.payload, classification)
+      flags: uncategorized_flag(item.flags, suggestion.category_id, kind),
+      payload: put_classification(item.payload, suggestion)
     }
 
     changed? =
@@ -370,6 +423,7 @@ defmodule CashCadence.Imports do
         {:ok, transaction} ->
           finish(item, :approved, transaction)
           Classifier.learn(item.normalized_description, transaction.category_id)
+          plan_installments(item, transaction)
           transaction
 
         {:error, changeset} ->
@@ -377,6 +431,45 @@ defmodule CashCadence.Imports do
       end
     end)
   end
+
+  def installment_forecast(
+        %InboxItem{payload: %{"installment" => %{"number" => number, "of" => of}}} = item,
+        %Transaction{category_id: category_id}
+      )
+      when number < of and not is_nil(category_id) do
+    %{remaining: of - number, ends_on: Date.shift(item.competence, month: of - number)}
+  end
+
+  def installment_forecast(_item, _transaction), do: nil
+
+  def installment_name(%InboxItem{} = item) do
+    (item.description || item.raw_description)
+    |> String.replace(~r/\s*\(\d+\/\d+\)\s*$/, "")
+    |> String.trim()
+  end
+
+  defp plan_installments(_item, %Transaction{category_id: nil}), do: :ok
+
+  defp plan_installments(
+         %InboxItem{payload: %{"installment" => %{"number" => number, "of" => of}}} = item,
+         transaction
+       ) do
+    name = installment_name(item)
+
+    Budgets.plan_installments(%{
+      name: name,
+      amount: item.amount,
+      category_id: transaction.category_id,
+      competence: item.competence,
+      number: number,
+      of: of,
+      match_text: Normalizer.normalize(name)
+    })
+
+    :ok
+  end
+
+  defp plan_installments(_item, _transaction), do: :ok
 
   defp maybe_put_category(transaction_attrs, %{"category_name" => name}) when is_binary(name) do
     transaction_attrs |> Map.put("category_name", name) |> Map.delete("category_id")

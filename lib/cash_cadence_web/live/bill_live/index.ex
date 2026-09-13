@@ -50,7 +50,12 @@ defmodule CashCadenceWeb.BillLive.Index do
   defp bill_changeset(nil), do: Budgets.change_recurring_bill(%RecurringBill{}, %{kind: :expense})
 
   defp bill_changeset(%RecurringBill{} = bill) do
-    Budgets.change_recurring_bill(%{bill | category_name: bill.category && bill.category.name})
+    Budgets.change_recurring_bill(%{
+      bill
+      | category_name: bill.category && bill.category.name,
+        starts_month: bill.starts_on && month_param(bill.starts_on),
+        ends_month: bill.ends_on && month_param(bill.ends_on)
+    })
   end
 
   defp assign_form(socket, changeset), do: assign(socket, form: to_form(changeset))
@@ -146,6 +151,7 @@ defmodule CashCadenceWeb.BillLive.Index do
   defp adherence_text(%{status: :paid, paid: paid}), do: "Pago · #{amount(paid)}"
   defp adherence_text(%{status: :partial, paid: paid}), do: "Parcial · #{amount(paid)}"
   defp adherence_text(%{status: :unpaid}), do: "Em aberto"
+  defp adherence_text(%{status: :none}), do: "—"
 
   defp launch_path(month, item) do
     ~p"/lancamentos?#{%{"m" => month_param(month), "new" => "1", "kind" => "expense", "category_name" => item.bill.category.name, "amount" => input_amount(item.remaining)}}"
@@ -276,6 +282,27 @@ defmodule CashCadenceWeb.BillLive.Index do
               else: "Adicionar"}</.button>
             <button type="button" phx-click="cancel" class="btn">Cancelar</button>
           </div>
+          <div class="grid gap-3 rounded-box border border-base-300 p-3 md:col-span-6 md:grid-cols-[10rem_10rem_7rem_1fr]">
+            <p class="text-xs text-base-content/60 md:col-span-4">
+              Opcional: vigência e parcelas. Sem vigência, vale todo mês. Com texto no extrato, o pagamento é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria.
+            </p>
+            <.input field={@form[:starts_month]} type="month" label="Começa em" />
+            <.input field={@form[:ends_month]} type="month" label="Termina em" />
+            <.input
+              field={@form[:installments_total]}
+              type="number"
+              label="Parcelas"
+              min="2"
+              placeholder="—"
+            />
+            <.input
+              field={@form[:match_text]}
+              type="text"
+              label="Texto no extrato"
+              placeholder="Ex.: RECEITA FEDERAL"
+              class="input w-full font-mono uppercase"
+            />
+          </div>
         </.form>
       </section>
 
@@ -299,10 +326,19 @@ defmodule CashCadenceWeb.BillLive.Index do
             </thead>
             <tbody>
               <tr :for={item <- @panel.items} id={"bill-#{item.bill.id}"}>
-                <td class="font-medium">{item.bill.name}</td>
+                <td class="font-medium">
+                  {item.bill.name}
+                  <span :if={item.installment} class="text-base-content/60">
+                    ({item.installment.number}/{item.installment.of})
+                  </span>
+                  <span :if={item.bill.ends_on} class="block text-xs font-normal text-base-content/50">
+                    até {month_short(item.bill.ends_on)}
+                  </span>
+                </td>
                 <td><.category_chip category={item.bill.category} show_fixed={false} /></td>
                 <td class="text-base-content/60">
-                  {if item.bill.due_day, do: "dia #{item.bill.due_day}", else: "—"}
+                  {if item.due_on, do: "dia #{item.due_on.day}", else: "—"}
+                  <.badge :if={item.overdue?} kind={:unpaid}>atrasada</.badge>
                 </td>
                 <td class="tabular text-right">{amount(item.expected)}</td>
                 <td class="tabular text-right">{amount(item.paid)}</td>

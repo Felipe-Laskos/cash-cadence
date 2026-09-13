@@ -8,10 +8,13 @@ defmodule CashCadence.Budgets do
   alias CashCadence.Money
   alias CashCadence.Repo
 
+  @tolerance Decimal.new("0.10")
+
   def list_recurring_bills(opts \\ []) do
     RecurringBill
     |> maybe_active(Keyword.get(opts, :active, true))
     |> maybe_kind(opts[:kind])
+    |> maybe_competence(opts[:competence])
     |> order_by([b], asc: fragment("lower(?)", b.name))
     |> preload(:category)
     |> Repo.all()
@@ -22,6 +25,19 @@ defmodule CashCadence.Budgets do
 
   defp maybe_kind(query, nil), do: query
   defp maybe_kind(query, kind), do: where(query, [b], b.kind == ^kind)
+
+  defp maybe_competence(query, nil), do: query
+
+  defp maybe_competence(query, %Date{} = competence) do
+    month = Date.beginning_of_month(competence)
+
+    where(
+      query,
+      [b],
+      (is_nil(b.starts_on) or b.starts_on <= ^month) and
+        (is_nil(b.ends_on) or b.ends_on >= ^month)
+    )
+  end
 
   def get_recurring_bill!(id), do: RecurringBill |> preload(:category) |> Repo.get!(id)
 
@@ -41,11 +57,12 @@ defmodule CashCadence.Budgets do
     do: RecurringBill.changeset(bill, attrs)
 
   def month_panel(%Date{} = competence) do
+    competence = Date.beginning_of_month(competence)
     paid = paid_by_category(competence, :expense)
 
     items =
-      Enum.map(list_recurring_bills(kind: :expense), fn bill ->
-        build_item(bill, Map.get(paid, bill.category_id, Money.zero()))
+      Enum.map(list_recurring_bills(kind: :expense, competence: competence), fn bill ->
+        build_item(bill, paid_amount(bill, competence, paid), competence)
       end)
 
     %{
@@ -54,15 +71,17 @@ defmodule CashCadence.Budgets do
       paid_total: items |> Enum.map(& &1.paid) |> Money.sum(),
       open_total: items |> Enum.map(& &1.remaining) |> Money.sum(),
       paid_count: Enum.count(items, &(&1.status == :paid)),
+      overdue_count: Enum.count(items, & &1.overdue?),
       count: length(items)
     }
   end
 
   def expected_incomes(%Date{} = competence) do
+    competence = Date.beginning_of_month(competence)
     received = paid_by_category(competence, :income)
 
-    Enum.map(list_recurring_bills(kind: :income), fn bill ->
-      amount = Map.get(received, bill.category_id, Money.zero())
+    Enum.map(list_recurring_bills(kind: :income, competence: competence), fn bill ->
+      amount = paid_amount(bill, competence, received)
 
       %{
         bill: bill,
@@ -81,18 +100,18 @@ defmodule CashCadence.Budgets do
     panels = Map.new(range, fn month -> {month, month_panel(month)} end)
 
     rows =
-      list_recurring_bills(kind: :expense)
-      |> Enum.map(fn bill ->
-        statuses =
-          Enum.map(range, fn month ->
-            item = panels[month].items |> Enum.find(&(&1.bill.id == bill.id))
-            %{competence: month, status: item.status, paid: item.paid}
-          end)
-
-        %{bill: bill, statuses: statuses}
+      Enum.map(list_recurring_bills(kind: :expense), fn bill ->
+        %{bill: bill, statuses: Enum.map(range, &month_status(panels[&1].items, bill, &1))}
       end)
 
     %{months: range, rows: rows}
+  end
+
+  defp month_status(items, bill, month) do
+    case Enum.find(items, &(&1.bill.id == bill.id)) do
+      nil -> %{competence: month, status: :none, paid: Money.zero()}
+      item -> %{competence: month, status: item.status, paid: item.paid}
+    end
   end
 
   def coverage(%Date{} = competence, %Decimal{} = income) do
@@ -108,7 +127,78 @@ defmodule CashCadence.Budgets do
     }
   end
 
-  defp build_item(bill, paid) do
+  def find_bill_match(kind, %Decimal{} = amount, %Date{} = competence, normalized)
+      when kind in [:expense, :income] do
+    competence = Date.beginning_of_month(competence)
+    paid = paid_by_category(competence, kind)
+
+    list_recurring_bills(kind: kind, competence: competence)
+    |> Enum.reject(&fully_paid?(&1, competence, paid))
+    |> Enum.flat_map(fn bill ->
+      case bill_score(bill, amount, normalized || "") do
+        nil -> []
+        score -> [{bill, score}]
+      end
+    end)
+    |> Enum.min_by(fn {_bill, score} -> score end, fn -> nil end)
+    |> case do
+      nil -> nil
+      {bill, {0, _distance}} -> %{bill: bill, strong?: true}
+      {bill, _score} -> %{bill: bill, strong?: false}
+    end
+  end
+
+  def find_bill_match(_kind, _amount, _competence, _normalized), do: nil
+
+  defp bill_score(bill, amount, normalized) do
+    text? = is_binary(bill.match_text) and String.contains?(normalized, bill.match_text)
+    distance = amount |> Decimal.sub(bill.expected_amount) |> Decimal.abs()
+    within? = Decimal.compare(distance, tolerance(bill.expected_amount)) != :gt
+
+    cond do
+      text? and within? -> {0, distance}
+      is_nil(bill.match_text) and within? -> {1, distance}
+      true -> nil
+    end
+  end
+
+  defp tolerance(expected), do: Decimal.mult(expected, @tolerance)
+
+  defp fully_paid?(bill, competence, paid) do
+    Decimal.compare(paid_amount(bill, competence, paid), bill.expected_amount) != :lt
+  end
+
+  def plan_installments(%{number: number, of: of} = plan)
+      when is_integer(number) and is_integer(of) and number < of do
+    starts_on = plan.competence |> Date.beginning_of_month() |> Date.shift(month: -(number - 1))
+
+    attrs = %{
+      name: String.slice(plan.name, 0, 60),
+      expected_amount: plan.amount,
+      kind: :expense,
+      category_id: plan.category_id,
+      starts_on: starts_on,
+      ends_on: Date.shift(starts_on, month: of - 1),
+      installments_total: of,
+      match_text: plan.match_text,
+      active: true
+    }
+
+    case get_recurring_bill_by_name(attrs.name) do
+      nil ->
+        create_recurring_bill(attrs)
+
+      %RecurringBill{installments_total: total} = bill when is_integer(total) ->
+        update_recurring_bill(bill, attrs)
+
+      _other ->
+        create_recurring_bill(%{attrs | name: String.slice(attrs.name, 0, 49) <> " (parcelas)"})
+    end
+  end
+
+  def plan_installments(_plan), do: {:ok, nil}
+
+  defp build_item(bill, paid, competence) do
     expected = bill.expected_amount
 
     status =
@@ -117,6 +207,8 @@ defmodule CashCadence.Budgets do
         Decimal.compare(paid, expected) == :lt -> :partial
         true -> :paid
       end
+
+    due_on = due_on(bill, competence)
 
     %{
       bill: bill,
@@ -129,9 +221,32 @@ defmodule CashCadence.Budgets do
           do: Decimal.sub(paid, expected),
           else: Money.zero()
         ),
-      progress: progress(paid, expected)
+      progress: progress(paid, expected),
+      due_on: due_on,
+      overdue?: status != :paid and overdue?(due_on),
+      installment: installment(bill, competence)
     }
   end
+
+  defp due_on(%RecurringBill{due_day: nil}, _competence), do: nil
+
+  defp due_on(%RecurringBill{due_day: day}, competence) do
+    Date.new!(competence.year, competence.month, min(day, Date.days_in_month(competence)))
+  end
+
+  defp overdue?(nil), do: false
+  defp overdue?(%Date{} = due_on), do: Date.compare(due_on, Date.utc_today()) == :lt
+
+  defp installment(
+         %RecurringBill{installments_total: total, starts_on: %Date{} = starts_on},
+         competence
+       )
+       when is_integer(total) do
+    number = (competence.year - starts_on.year) * 12 + competence.month - starts_on.month + 1
+    %{number: number |> max(1) |> min(total), of: total}
+  end
+
+  defp installment(_bill, _competence), do: nil
 
   defp progress(paid, expected) do
     case Money.ratio(paid, expected) do
@@ -146,6 +261,25 @@ defmodule CashCadence.Budgets do
         |> Decimal.to_integer()
     end
   end
+
+  defp paid_amount(%RecurringBill{match_text: text} = bill, competence, _paid)
+       when is_binary(text) do
+    lower = Decimal.sub(bill.expected_amount, tolerance(bill.expected_amount))
+    upper = Decimal.add(bill.expected_amount, tolerance(bill.expected_amount))
+
+    Money.sum([
+      Repo.one(
+        from t in Transaction,
+          where:
+            is_nil(t.deleted_at) and t.kind == ^bill.kind and t.competence == ^competence and
+              t.amount >= ^lower and t.amount <= ^upper and
+              ilike(t.normalized_description, ^"%#{text}%"),
+          select: sum(t.amount)
+      )
+    ])
+  end
+
+  defp paid_amount(bill, _competence, paid), do: Map.get(paid, bill.category_id, Money.zero())
 
   defp paid_by_category(competence, kind) do
     Repo.all(

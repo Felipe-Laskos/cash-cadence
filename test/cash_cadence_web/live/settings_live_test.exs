@@ -106,4 +106,23 @@ defmodule CashCadenceWeb.SettingsLiveTest do
     view |> element("#memory-#{memory.id} button", "Esquecer") |> render_click()
     assert Classifier.count_memory() == 1
   end
+
+  test "stores the card competence mode", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/configuracoes?account=new")
+
+    view
+    |> form("#account-form",
+      bank_account: %{
+        name: "Cartão teste",
+        bank: "itau",
+        kind: "credit_card",
+        competence_mode: "statement_month"
+      }
+    )
+    |> render_submit()
+
+    [account] = Ledger.list_bank_accounts()
+    assert account.competence_mode == :statement_month
+    assert has_element?(view, "#account-#{account.id}", "mês da fatura")
+  end
 end

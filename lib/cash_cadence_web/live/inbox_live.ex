@@ -53,7 +53,12 @@ defmodule CashCadenceWeb.InboxLive do
     case Imports.approve(item, attrs) do
       {:ok, transaction} ->
         {:noreply,
-         after_action(socket, item, "Lançamento de #{brl(transaction.amount)} aprovado.")}
+         after_action(
+           socket,
+           item,
+           "Lançamento de #{brl(transaction.amount)} aprovado." <>
+             forecast_note(item, transaction)
+         )}
 
       {:error, _changeset} ->
         {:noreply,
@@ -94,6 +99,16 @@ defmodule CashCadenceWeb.InboxLive do
      |> reload()}
   end
 
+  defp forecast_note(item, transaction) do
+    case Imports.installment_forecast(item, transaction) do
+      nil ->
+        ""
+
+      %{remaining: remaining, ends_on: ends_on} ->
+        " #{remaining} #{if remaining == 1, do: "parcela prevista", else: "parcelas previstas"} em Despesas fixas até #{month_short(ends_on)}."
+    end
+  end
+
   defp source_label(item) do
     bank =
       case item.batch.bank do
@@ -126,6 +141,7 @@ defmodule CashCadenceWeb.InboxLive do
 
   defp source(%{payload: %{"suggestion_source" => "rule"}}), do: " · regra"
   defp source(%{payload: %{"suggestion_source" => "memory"}}), do: " · memória"
+  defp source(%{payload: %{"suggestion_source" => "bill"}}), do: " · fixa"
   defp source(_item), do: ""
 
   defp category_default(item) do
@@ -267,6 +283,10 @@ defmodule CashCadenceWeb.InboxLive do
                 </.badge>
                 <.badge :if={hint_label(item.payload)} kind={:neutral}>
                   Itaú: {hint_label(item.payload)}
+                </.badge>
+                <.badge :if={item.payload["bill_name"]} kind={:accent}>
+                  <.icon name="hero-arrow-path-micro" class="size-3" />
+                  fixa: {item.payload["bill_name"]}
                 </.badge>
               </div>
               <div :if={item.match_transaction} class="alert alert-info alert-soft py-2 text-sm">

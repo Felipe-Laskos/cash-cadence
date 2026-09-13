@@ -82,4 +82,39 @@ defmodule CashCadenceWeb.BillLiveTest do
     refute has_element?(view, "#bill-#{phone.id}")
     assert Budgets.list_recurring_bills() == []
   end
+
+  test "creates a bill with a validity window and shows installments and overdue state", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-05&new=1")
+
+    view
+    |> form("#bill-form",
+      recurring_bill: %{
+        name: "Oficina",
+        kind: "expense",
+        category_name: "Mecânico",
+        expected_amount: "208,00",
+        due_day: "5",
+        starts_month: "2026-04",
+        ends_month: "2026-06",
+        installments_total: "3",
+        match_text: "oficina"
+      }
+    )
+    |> render_submit()
+
+    assert render(view) =~ "Despesa fixa salva."
+    [bill] = Budgets.list_recurring_bills()
+    assert bill.starts_on == ~D[2026-04-01]
+    assert bill.ends_on == ~D[2026-06-01]
+    assert bill.match_text == "OFICINA"
+    assert has_element?(view, "#bill-#{bill.id}", "(2/3)")
+    assert has_element?(view, "#bill-#{bill.id}", "até jun/26")
+    assert has_element?(view, "#bill-#{bill.id}", "dia 5")
+    assert has_element?(view, "#bill-#{bill.id}", "atrasada")
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-07")
+    refute has_element?(view, "#bill-#{bill.id}")
+  end
 end

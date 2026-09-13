@@ -279,12 +279,18 @@ defmodule CashCadenceWeb.MonthLive do
               </thead>
               <tbody>
                 <tr :for={item <- @panel.items}>
-                  <td class="font-medium">{item.bill.name}</td>
+                  <td class="font-medium">
+                    {item.bill.name}
+                    <span :if={item.installment} class="text-base-content/60">
+                      ({item.installment.number}/{item.installment.of})
+                    </span>
+                  </td>
                   <td class="tabular text-right">{amount(item.expected)}</td>
                   <td class="tabular text-right">{amount(item.paid)}</td>
                   <td><.progress value={item.progress} kind={item.status} /></td>
                   <td>
                     <.badge kind={item.status}>{status_text(item)}</.badge>
+                    <.badge :if={item.overdue?} kind={:unpaid}>venceu dia {item.due_on.day}</.badge>
                   </td>
                 </tr>
               </tbody>
