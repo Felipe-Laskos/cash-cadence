@@ -109,4 +109,50 @@ defmodule CashCadenceWeb.InboxLiveTest do
     {:ok, _view, html} = live(conn, ~p"/entrada")
     refute html =~ "O arquivo não fechou por completo"
   end
+
+  test "approves with a corrected date and amount", %{conn: conn} do
+    {:ok, _batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
+
+    bakery =
+      Enum.find(Imports.list_inbox(), &(&1.description == "Compra no débito: PADARIA EXEMPLO"))
+
+    {:ok, view, _html} = live(conn, ~p"/entrada")
+
+    view
+    |> form("#item-#{bakery.id}-form",
+      item: %{
+        kind: "expense",
+        category_name: "Comida",
+        description: "Padaria",
+        date: "2026-04-28",
+        amount: "49,90"
+      }
+    )
+    |> render_submit()
+
+    assert render(view) =~ "49,90 aprovado."
+    [transaction] = Ledger.list_transactions()
+    assert transaction.date == ~D[2026-04-28]
+    assert transaction.competence == ~D[2026-04-01]
+    assert Decimal.equal?(transaction.amount, Decimal.new("49.90"))
+  end
+
+  test "keeps the item when the corrected amount is invalid", %{conn: conn} do
+    {:ok, _batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
+
+    bakery =
+      Enum.find(Imports.list_inbox(), &(&1.description == "Compra no débito: PADARIA EXEMPLO"))
+
+    {:ok, view, _html} = live(conn, ~p"/entrada")
+
+    html =
+      view
+      |> form("#item-#{bakery.id}-form",
+        item: %{kind: "expense", category_name: "Comida", amount: "abc"}
+      )
+      |> render_submit()
+
+    assert html =~ "Não foi possível aprovar"
+    assert Imports.count_pending() == 3
+  end
 end

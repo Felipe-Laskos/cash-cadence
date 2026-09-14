@@ -9,7 +9,7 @@ defmodule CashCadence.Imports.Batch do
 
   schema "import_batches" do
     field :source, Ecto.Enum, values: [:upload, :cli]
-    field :format, Ecto.Enum, values: [:ofx, :csv, :pdf]
+    field :format, Ecto.Enum, values: [:ofx, :csv, :pdf, :image]
     field :bank, Ecto.Enum, values: [:nubank, :itau, :unknown], default: :unknown
     field :account_kind, Ecto.Enum, values: [:checking, :credit_card]
     field :file_name, :string

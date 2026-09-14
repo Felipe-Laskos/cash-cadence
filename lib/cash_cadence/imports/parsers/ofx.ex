@@ -3,7 +3,7 @@ defmodule CashCadence.Imports.Parsers.OFX do
 
   alias CashCadence.Imports.Raw
 
-  def parse(binary) when is_binary(binary) do
+  def parse(binary, _opts \\ []) when is_binary(binary) do
     blocks = Regex.scan(~r/<STMTTRN>(.*?)<\/STMTTRN>/s, binary)
 
     if blocks == [] do

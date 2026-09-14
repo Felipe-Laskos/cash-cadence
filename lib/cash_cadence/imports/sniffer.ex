@@ -6,6 +6,9 @@ defmodule CashCadence.Imports.Sniffer do
   @nubank_checking_header "Data,Valor,Identificador,Descrição"
   @nubank_card_header "date,category,title,amount"
 
+  def detect(<<0xFF, 0xD8, 0xFF, _rest::binary>>), do: image()
+  def detect(<<0x89, "PNG", _rest::binary>>), do: image()
+
   def detect("%PDF-" <> _rest) do
     {:ok,
      %{format: :pdf, bank: :unknown, account_kind: nil, encoding: :binary, parser: Parsers.PDF}}
@@ -48,6 +51,17 @@ defmodule CashCadence.Imports.Sniffer do
       true ->
         {:error, :unknown_format}
     end
+  end
+
+  defp image do
+    {:ok,
+     %{
+       format: :image,
+       bank: :unknown,
+       account_kind: nil,
+       encoding: :binary,
+       parser: Parsers.Image
+     }}
   end
 
   def strip_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>), do: rest

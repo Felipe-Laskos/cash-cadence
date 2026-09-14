@@ -62,7 +62,11 @@ defmodule CashCadenceWeb.InboxLive do
 
       {:error, _changeset} ->
         {:noreply,
-         put_flash(socket, :error, "Não foi possível aprovar: confira categoria e tipo.")}
+         put_flash(
+           socket,
+           :error,
+           "Não foi possível aprovar: confira tipo, categoria, data e valor."
+         )}
     end
   end
 
@@ -124,6 +128,7 @@ defmodule CashCadenceWeb.InboxLive do
   defp format_label(:ofx), do: "OFX"
   defp format_label(:csv), do: "CSV"
   defp format_label(:pdf), do: "PDF"
+  defp format_label(:image), do: "Foto"
 
   defp hint_label(%{"itau_category" => category} = payload) do
     Enum.join(Enum.reject([category, payload["city"]], &is_nil/1), " · ")
@@ -266,6 +271,24 @@ defmodule CashCadenceWeb.InboxLive do
                   placeholder="Descrição"
                   class="input input-sm w-56"
                 />
+                <input
+                  type="date"
+                  name="item[date]"
+                  value={Date.to_iso8601(item.date)}
+                  class="input input-sm w-36"
+                  aria-label="Data"
+                />
+                <input
+                  type="text"
+                  name="item[amount]"
+                  value={input_amount(item.amount)}
+                  inputmode="decimal"
+                  class="input input-sm w-28 text-right font-mono"
+                  aria-label="Valor"
+                />
+                <.badge :if={item.payload["ocr"]} kind={:warn}>
+                  <.icon name="hero-eye-micro" class="size-3" /> lido por OCR: confira data e valor
+                </.badge>
                 <.badge
                   :if={confidence_badge(item)}
                   kind={elem(confidence_badge(item), 0)}

@@ -11,6 +11,7 @@ defmodule CashCadenceWeb.ImportLive do
         page_title: "Importar",
         accounts: Ledger.list_bank_accounts(),
         account_id: "",
+        password: "",
         batches: Imports.list_batches(),
         detail: nil
       )
@@ -21,7 +22,11 @@ defmodule CashCadenceWeb.ImportLive do
 
   @impl true
   def handle_event("validate", params, socket) do
-    {:noreply, assign(socket, account_id: params["account_id"] || socket.assigns.account_id)}
+    {:noreply,
+     assign(socket,
+       account_id: params["account_id"] || socket.assigns.account_id,
+       password: params["password"] || socket.assigns.password
+     )}
   end
 
   def handle_event("cancel", %{"ref" => ref}, socket),
@@ -41,7 +46,8 @@ defmodule CashCadenceWeb.ImportLive do
          {entry.client_name,
           Imports.ingest_binary(File.read!(path), entry.client_name,
             source: :upload,
-            bank_account_id: account_id
+            bank_account_id: account_id,
+            password: params["password"]
           )}}
       end)
 
@@ -94,7 +100,21 @@ defmodule CashCadenceWeb.ImportLive do
     do: "#{name}: PDF não reconhecido, por enquanto só extrato e fatura do Itaú"
 
   defp failure({name, {:error, :encrypted}}),
-    do: "#{name}: PDF protegido por senha, remova a senha e tente de novo"
+    do: "#{name}: PDF protegido por senha, informe a senha no campo ao lado da conta"
+
+  defp failure({name, {:error, :wrong_password}}), do: "#{name}: senha do PDF incorreta"
+
+  defp failure({name, {:error, :qpdf_missing}}),
+    do: "#{name}: qpdf não encontrado neste computador para abrir PDF com senha"
+
+  defp failure({name, {:error, :ocr_missing}}),
+    do: "#{name}: OCR (ocrmypdf) não encontrado neste computador"
+
+  defp failure({name, {:error, {:ocr_failed, _status}}}),
+    do: "#{name}: o OCR não conseguiu ler a imagem"
+
+  defp failure({name, {:error, :timeout}}),
+    do: "#{name}: a leitura demorou demais e foi cancelada"
 
   defp failure({name, {:error, :pdftotext_missing}}),
     do: "#{name}: leitor de PDF (pdftotext) não encontrado neste computador"
@@ -106,13 +126,14 @@ defmodule CashCadenceWeb.ImportLive do
   defp plural(_, _singular, plural), do: plural
 
   defp upload_error(:too_large), do: "arquivo maior que 10 MB"
-  defp upload_error(:not_accepted), do: "só OFX, CSV e PDF"
+  defp upload_error(:not_accepted), do: "só OFX, CSV, PDF e imagens"
   defp upload_error(:too_many_files), do: "no máximo 10 arquivos por vez"
   defp upload_error(other), do: to_string(other)
 
   defp format_label(:ofx), do: "OFX"
   defp format_label(:csv), do: "CSV"
   defp format_label(:pdf), do: "PDF"
+  defp format_label(:image), do: "Foto"
 
   defp bank_label(:nubank), do: "Nubank"
   defp bank_label(:itau), do: "Itaú"
@@ -141,7 +162,7 @@ defmodule CashCadenceWeb.ImportLive do
       <div class="grid gap-4 xl:grid-cols-3">
         <.card
           title="Enviar arquivos"
-          subtitle="OFX de conta, CSV do Nubank (conta e cartão fechado), PDF do Itaú (extrato e fatura)"
+          subtitle="OFX de conta, CSV do Nubank, PDF do Itaú (extrato e fatura, inclusive escaneado ou foto)"
           class="xl:col-span-2"
         >
           <.form
@@ -204,6 +225,17 @@ defmodule CashCadenceWeb.ImportLive do
                   </option>
                 </select>
               </label>
+              <label class="form-control w-48">
+                <span class="label-text mb-1 text-xs font-semibold text-base-content/60">Senha do PDF (se tiver)</span>
+                <input
+                  type="password"
+                  name="password"
+                  value={@password}
+                  autocomplete="off"
+                  placeholder="só para PDF protegido"
+                  class="input w-full"
+                />
+              </label>
               <.button
                 variant="primary"
                 disabled={@uploads.files.entries == []}
@@ -217,7 +249,8 @@ defmodule CashCadenceWeb.ImportLive do
           </.form>
           <p class="text-xs text-base-content/50">
             Os arquivos são lidos e descartados; fica guardado o resumo do lote e, para PDF, o texto extraído para conferência.
-            A leitura confere saldo por saldo e total da fatura: qualquer diferença vira alerta.
+            A leitura confere saldo por saldo e total da fatura: qualquer diferença vira alerta. PDF só imagem e fotos passam por OCR local e os itens pedem conferência de data e valor.
+            A senha não é guardada.
           </p>
         </.card>
 
@@ -231,7 +264,10 @@ defmodule CashCadenceWeb.ImportLive do
               <b>Itaú conta</b>: no app ou internet banking, Extrato → compartilhar/exportar → PDF.
             </li>
             <li>
-              <b>Itaú cartão</b>: Cartões → fatura fechada → PDF. Se o PDF pedir senha, salve uma cópia sem senha antes.
+              <b>Itaú cartão</b>: Cartões → fatura fechada → PDF. Se o PDF pedir senha, informe-a no campo ao lado da conta.
+            </li>
+            <li>
+              <b>Escaneado ou foto</b>: PDF sem texto, JPG ou PNG do extrato ou da fatura. Foto reta, bem iluminada e com a página inteira.
             </li>
           </ul>
         </.card>

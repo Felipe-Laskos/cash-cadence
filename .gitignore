@@ -38,3 +38,6 @@ npm-debug.log
 /priv/repo/seeds/private/
 /docs/
 /design/
+
+# Local backups written by mix cash.backup
+/backups/

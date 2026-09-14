@@ -618,11 +618,17 @@ defmodule CashCadenceWeb.SettingsLive do
         <.card title="Backup e exportação" subtitle="Os dados ficam só neste computador">
           <:actions>
             <.link href={~p"/relatorios/export.csv"} class="btn btn-sm">
-              <.icon name="hero-arrow-down-tray-micro" class="size-4" /> Exportar lançamentos (CSV)
+              <.icon name="hero-table-cells-micro" class="size-4" /> Lançamentos (CSV)
+            </.link>
+            <.link href={~p"/backup.json"} class="btn btn-primary btn-sm">
+              <.icon name="hero-arrow-down-tray-micro" class="size-4" /> Baixar backup completo
             </.link>
           </:actions>
           <p class="text-sm text-base-content/80">
-            O CSV abre em qualquer planilha e serve como cópia dos lançamentos. O banco de dados inteiro vive no volume do Docker; um backup em arquivo único, com restauração, chega na próxima etapa.
+            O backup completo é um único arquivo JSON com lançamentos, categorias, contas, despesas fixas, regras, memória e caixa de entrada. Guarde numa nuvem sua. O CSV abre em qualquer planilha.
+          </p>
+          <p class="mt-2 text-sm text-base-content/60">
+            Para restaurar, na pasta do projeto: <code class="font-mono text-xs">mix cash.restore ARQUIVO.json --yes</code>. Isso substitui todos os dados atuais. Também dá para gerar o arquivo pelo terminal com <code class="font-mono text-xs">mix cash.backup</code>.
           </p>
         </.card>
       </section>

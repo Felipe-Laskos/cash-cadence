@@ -22,7 +22,7 @@ defmodule CashCadence.Imports do
     with nil <- Repo.get_by(Batch, file_sha256: sha),
          {:ok, meta} <- Sniffer.detect(binary),
          decoded = binary |> Sniffer.strip_bom() |> Sniffer.transcode(meta.encoding),
-         {:ok, parsed} <- meta.parser.parse(decoded) do
+         {:ok, parsed} <- meta.parser.parse(decoded, password: opts[:password]) do
       bank = parsed[:bank] || meta.bank
       account = resolve_account(parsed.account, opts[:bank_account_id], bank)
       statement_competence = statement_competence(parsed, account)
@@ -400,12 +400,14 @@ defmodule CashCadence.Imports do
     Repo.transaction(fn ->
       attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
 
+      {date, competence} = approved_date(attrs["date"], item)
+
       transaction_attrs =
         %{
-          "date" => item.date,
+          "date" => date,
           "kind" => Map.get(attrs, "kind", Atom.to_string(item.kind)),
-          "competence" => item.competence,
-          "amount" => item.amount,
+          "competence" => competence,
+          "amount" => present_or(attrs["amount"], item.amount),
           "description" => Map.get(attrs, "description", item.description),
           "category_id" => item.suggested_category_id,
           "source" => :import,
@@ -470,6 +472,22 @@ defmodule CashCadence.Imports do
   end
 
   defp plan_installments(_item, _transaction), do: :ok
+
+  defp approved_date(value, item) do
+    with true <- is_binary(value) and String.trim(value) != "",
+         {:ok, date} <- Date.from_iso8601(String.trim(value)),
+         true <- date != item.date do
+      {date, Date.beginning_of_month(date)}
+    else
+      _ -> {item.date, item.competence}
+    end
+  end
+
+  defp present_or(value, default) when is_binary(value) do
+    if String.trim(value) == "", do: default, else: value
+  end
+
+  defp present_or(_value, default), do: default
 
   defp maybe_put_category(transaction_attrs, %{"category_name" => name}) when is_binary(name) do
     transaction_attrs |> Map.put("category_name", name) |> Map.delete("category_id")

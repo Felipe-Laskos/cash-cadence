@@ -16,7 +16,8 @@ defmodule CashCadenceWeb.SettingsLiveTest do
     assert html =~ "Nenhuma regra ainda."
     assert html =~ "Nada aprendido ainda."
     assert has_element?(view, "#conta", "Alterar e-mail ou senha")
-    assert has_element?(view, "#backup a", "Exportar lançamentos (CSV)")
+    assert has_element?(view, "#backup a", "Lançamentos (CSV)")
+    assert has_element?(view, "#backup a[href='/backup.json']", "Baixar backup completo")
     assert has_element?(view, "#celular", "Adicionar à tela inicial")
     assert has_element?(view, "aside a.btn-active", "Configurações")
   end

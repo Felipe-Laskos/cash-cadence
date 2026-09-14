@@ -60,6 +60,7 @@ defmodule CashCadenceWeb.Router do
 
     post "/users/update-password", UserSessionController, :update_password
     get "/relatorios/export.csv", ExportController, :transactions
+    get "/backup.json", BackupController, :download
   end
 
   scope "/", CashCadenceWeb do

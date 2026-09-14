@@ -4,7 +4,7 @@ defmodule CashCadence.Imports.Parsers.CSV.NubankCard do
   alias CashCadence.Imports.Raw
   alias NimbleCSV.RFC4180, as: CSV
 
-  def parse(binary) when is_binary(binary) do
+  def parse(binary, _opts \\ []) when is_binary(binary) do
     rows = binary |> CSV.parse_string() |> Enum.reject(&(&1 == [] or &1 == [""]))
 
     if rows == [] do

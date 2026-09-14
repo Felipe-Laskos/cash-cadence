@@ -81,4 +81,25 @@ defmodule CashCadenceWeb.ImportLiveTest do
     assert html =~ "outro.pdf: PDF não reconhecido" or html =~ "outro.pdf: leitor de PDF"
     assert Imports.list_batches() == []
   end
+
+  @tag :pdftotext
+  @tag :qpdf
+  test "asks for the password of a protected PDF and reads it once given", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/importar")
+    upload(view, "itau_extrato_senha.pdf")
+    html = view |> form("#import-form", %{account_id: "", password: ""}) |> render_submit()
+    assert html =~ "PDF protegido por senha, informe a senha"
+    assert Imports.list_batches() == []
+
+    upload(view, "itau_extrato_senha.pdf")
+    html = view |> form("#import-form", %{account_id: "", password: "errada"}) |> render_submit()
+    assert html =~ "senha do PDF incorreta"
+
+    upload(view, "itau_extrato_senha.pdf")
+    view |> form("#import-form", %{account_id: "", password: "senha123"}) |> render_submit()
+    {_path, flash} = assert_redirect(view)
+    assert flash["info"] =~ "7 itens novos"
+    [batch] = Imports.list_batches()
+    assert batch.raw_text =~ "SALDO DO DIA"
+  end
 end
