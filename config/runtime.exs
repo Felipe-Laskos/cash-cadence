@@ -20,6 +20,10 @@ if System.get_env("PHX_SERVER") do
   config :cash_cadence, CashCadenceWeb.Endpoint, server: true
 end
 
+if backup_dir = System.get_env("CASH_BACKUP_DIR") do
+  config :cash_cadence, :backup, dir: backup_dir
+end
+
 config :cash_cadence, CashCadenceWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 

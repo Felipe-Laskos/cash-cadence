@@ -223,8 +223,22 @@ defmodule CashCadence.Budgets do
         ),
       progress: progress(paid, expected),
       due_on: due_on,
+      due_in: due_in(due_on, status),
       overdue?: status != :paid and overdue?(due_on),
       installment: installment(bill, competence)
+    }
+  end
+
+  defp due_in(nil, _status), do: nil
+  defp due_in(_due_on, :paid), do: nil
+  defp due_in(%Date{} = due_on, _status), do: Date.diff(due_on, Date.utc_today())
+
+  def upcoming(days \\ 7) do
+    items = month_panel(Date.utc_today()).items
+
+    %{
+      soon: Enum.filter(items, &(is_integer(&1.due_in) and &1.due_in >= 0 and &1.due_in <= days)),
+      overdue: Enum.filter(items, & &1.overdue?)
     }
   end
 

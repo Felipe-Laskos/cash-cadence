@@ -104,4 +104,55 @@ defmodule CashCadenceWeb.TransactionLiveTest do
     assert has_element?(view, "#transaction_category_name[value='Combustível']")
     assert has_element?(view, "#transaction_amount[value='350,00']")
   end
+
+  test "saves an explicit competence month and shows it on the row", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/lancamentos?m=2026-06")
+
+    view
+    |> form("#transaction-form",
+      transaction: %{
+        date: "2026-05-30",
+        kind: "expense",
+        category_name: "Comida",
+        amount: "10,00",
+        competence_month: "2026-06"
+      }
+    )
+    |> render_submit()
+
+    [transaction] = Ledger.list_transactions(%{competence: ~D[2026-06-01]})
+    assert transaction.date == ~D[2026-05-30]
+    assert has_element?(view, "#days", "comp. jun/26")
+  end
+
+  test "links an income as reimbursement of an expense and undoes it", %{conn: conn} do
+    food = category_fixture(%{name: "Comida"})
+
+    dinner =
+      transaction_fixture(%{
+        date: ~D[2026-05-10],
+        amount: "120.00",
+        category_id: food.id,
+        description: "Jantar"
+      })
+
+    refund = transaction_fixture(%{date: ~D[2026-05-12], kind: :income, amount: "60.00"})
+
+    {:ok, view, _html} = live(conn, ~p"/lancamentos?m=2026-05")
+    view |> element("a[aria-label='É reembolso']") |> render_click()
+    assert_patch(view, ~p"/lancamentos?m=2026-05&reimburse=#{refund.id}")
+    assert has_element?(view, "#reimbursement-form option", "Jantar")
+
+    view |> form("#reimbursement-form", %{expense_id: dinner.id}) |> render_submit()
+    assert_patch(view, ~p"/lancamentos?m=2026-05")
+    html = render(view)
+    assert html =~ "Reembolso ligado"
+    assert html =~ "reembolso de"
+    assert html =~ "reembolsado 60,00"
+    assert html =~ "já descontados"
+    assert Ledger.get_transaction!(refund.id).reimbursement_of_id == dinner.id
+
+    view |> element("button[aria-label='Desfazer reembolso']") |> render_click()
+    assert Ledger.get_transaction!(refund.id).reimbursement_of_id == nil
+  end
 end

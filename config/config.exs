@@ -20,6 +20,8 @@ config :cash_cadence, :scopes,
     test_setup_helper: :register_and_log_in_user
   ]
 
+config :cash_cadence, :backup, enabled: true, dir: "backups", keep: 14, interval_hours: 24
+
 config :cash_cadence,
   ecto_repos: [CashCadence.Repo],
   generators: [timestamp_type: :utc_datetime]

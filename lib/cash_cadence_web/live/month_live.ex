@@ -38,6 +38,7 @@ defmodule CashCadenceWeb.MonthLive do
       slices: slices,
       slice_total: totals.expense,
       recent: %{competence: month} |> Ledger.list_transactions() |> Enum.take(5),
+      upcoming: upcoming(month),
       all_time: Ledger.all_time_totals(),
       savings_rate: Money.ratio(totals.net, totals.income),
       monthly_chart: monthly_chart,
@@ -107,6 +108,15 @@ defmodule CashCadenceWeb.MonthLive do
     }
   end
 
+  defp upcoming(month) do
+    if month == Date.beginning_of_month(Date.utc_today()),
+      do: Budgets.upcoming(7),
+      else: %{soon: [], overdue: []}
+  end
+
+  defp due_text(%{bill: bill, due_on: due_on, remaining: remaining}),
+    do: "#{bill.name} (dia #{due_on.day} · #{brl(remaining)})"
+
   defp share(%Decimal{} = part, total) do
     case Money.ratio(part, total) do
       nil -> 0
@@ -157,12 +167,17 @@ defmodule CashCadenceWeb.MonthLive do
         <.kpi label="Despesas do mês">
           <span class="text-base font-medium text-base-content/50">R$</span> {amount(@totals.expense)}
           <:footer>
-            <.delta
-              current={@totals.expense}
-              previous={@previous.expense}
-              label="vs mês anterior"
-              good_when={:down}
-            />
+            <div class="space-y-1">
+              <.delta
+                current={@totals.expense}
+                previous={@previous.expense}
+                label="vs mês anterior"
+                good_when={:down}
+              />
+              <span :if={Money.positive?(@totals.reimbursed)}>
+                líquidas de {brl(@totals.reimbursed)} em reembolsos
+              </span>
+            </div>
           </:footer>
         </.kpi>
         <.kpi label="Saldo do mês">
@@ -200,6 +215,23 @@ defmodule CashCadenceWeb.MonthLive do
             </div>
           </:footer>
         </.kpi>
+      </div>
+
+      <div
+        :if={@upcoming.soon != [] or @upcoming.overdue != []}
+        id="upcoming-bills"
+        class="alert alert-warning alert-soft items-start text-sm"
+      >
+        <.icon name="hero-bell-alert-micro" class="mt-0.5 size-4" />
+        <div class="space-y-1">
+          <p :if={@upcoming.overdue != []}>
+            <b>Atrasadas:</b> {Enum.map_join(@upcoming.overdue, " · ", &due_text/1)}
+          </p>
+          <p :if={@upcoming.soon != []}>
+            <b>Vencem nos próximos 7 dias:</b> {Enum.map_join(@upcoming.soon, " · ", &due_text/1)}
+          </p>
+        </div>
+        <.link navigate={~p"/fixas"} class="btn btn-sm">Ver fixas</.link>
       </div>
 
       <div class="grid gap-4 xl:grid-cols-3">

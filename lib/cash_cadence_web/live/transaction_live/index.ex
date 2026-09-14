@@ -30,10 +30,15 @@ defmodule CashCadenceWeb.TransactionLive.Index do
     }
 
     editing = params["edit"] && Ledger.get_transaction!(params["edit"])
+    reimbursing = params["reimburse"] && Ledger.get_transaction!(params["reimburse"])
 
     socket =
       socket
       |> assign(month: month, filters: filters, editing: editing, focus_new: params["new"] == "1")
+      |> assign(
+        reimbursing: reimbursing,
+        candidates: (reimbursing && Ledger.reimbursement_candidates(reimbursing)) || []
+      )
       |> assign_form(form_changeset(editing, month, prefill(params)))
       |> reload()
 
@@ -92,9 +97,37 @@ defmodule CashCadenceWeb.TransactionLive.Index do
   defp form_changeset(%Transaction{} = transaction, _month, _prefill) do
     Ledger.change_transaction(%{
       transaction
-      | category_name: transaction.category && transaction.category.name
+      | category_name: transaction.category && transaction.category.name,
+        competence_month: competence_override(transaction)
     })
   end
+
+  defp competence_override(%Transaction{date: date, competence: competence}) do
+    if Date.beginning_of_month(date) == competence, do: nil, else: month_param(competence)
+  end
+
+  defp overridden?(%Transaction{date: date, competence: competence}),
+    do: Date.beginning_of_month(date) != competence
+
+  defp reimbursement_label(%Transaction{} = original) do
+    Enum.join(
+      Enum.reject(
+        [
+          short_date(original.date),
+          original.description || (original.category && original.category.name),
+          amount(original.amount)
+        ],
+        &is_nil/1
+      ),
+      " · "
+    )
+  end
+
+  defp reimbursed_total(%Transaction{reimbursements: reimbursements})
+       when is_list(reimbursements),
+       do: reimbursements |> Enum.map(& &1.amount) |> Money.sum()
+
+  defp reimbursed_total(_transaction), do: Money.zero()
 
   defp prefill(params) do
     params
@@ -197,6 +230,28 @@ defmodule CashCadenceWeb.TransactionLive.Index do
     {:noreply, socket |> put_flash(:info, "Lançamento excluído.") |> reload()}
   end
 
+  def handle_event("link_reimbursement", %{"expense_id" => ""}, socket), do: {:noreply, socket}
+
+  def handle_event("link_reimbursement", %{"expense_id" => expense_id}, socket) do
+    expense = Ledger.get_transaction!(expense_id)
+
+    case Ledger.link_reimbursement(socket.assigns.reimbursing, expense) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Reembolso ligado: a despesa passa a valer líquida nos totais.")
+         |> push_patch(to: list_path(socket.assigns))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Não foi possível ligar como reembolso.")}
+    end
+  end
+
+  def handle_event("unlink_reimbursement", %{"id" => id}, socket) do
+    {:ok, _} = id |> Ledger.get_transaction!() |> Ledger.unlink_reimbursement()
+    {:noreply, socket |> put_flash(:info, "Reembolso desfeito.") |> reload()}
+  end
+
   def handle_event("filter", params, socket) do
     overrides = %{"category" => params["category"], "q" => params["q"]}
     {:noreply, push_patch(socket, to: list_path(socket.assigns, overrides))}
@@ -277,7 +332,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           phx-change="validate"
           phx-submit={JS.push("save") |> JS.focus(to: "#transaction_category_name")}
           class={[
-            "grid gap-2 border-b border-base-300 p-4 md:grid-cols-[9rem_10rem_1fr_1fr_9rem_auto] md:items-start",
+            "grid gap-2 border-b border-base-300 p-4 md:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto] md:items-start",
             @editing && "bg-secondary/30"
           ]}
         >
@@ -308,6 +363,12 @@ defmodule CashCadenceWeb.TransactionLive.Index do
             required
             class="input tabular text-right"
           />
+          <.input
+            field={@form[:competence_month]}
+            type="month"
+            title="Competência (só se for diferente do mês da data)"
+            aria-label="Competência"
+          />
           <div class="flex gap-1">
             <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
               do: "Salvar",
@@ -316,8 +377,33 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           </div>
         </.form>
         <p class="px-4 py-2 text-xs text-base-content/50">
-          Enter salva e mantém a data para o próximo · a categoria aceita as primeiras letras · valores com vírgula ou ponto
+          Enter salva e mantém a data para o próximo · a categoria aceita as primeiras letras · valores com vírgula ou ponto · o mês ao lado do valor só se a competência for outra
         </p>
+
+        <section :if={@reimbursing} class="border-b border-warning/60 bg-warning/5">
+          <form
+            id="reimbursement-form"
+            phx-submit="link_reimbursement"
+            class="flex flex-wrap items-end gap-3 p-4"
+          >
+            <div class="text-sm">
+              <p class="font-semibold">
+                Ligar a receita de {amount(@reimbursing.amount)} em {short_date(@reimbursing.date)} como reembolso de…
+              </p>
+              <p class="text-base-content/60">
+                A despesa original passa a contar líquida e essa receita sai da soma de receitas. A lista traz as despesas dos últimos 60 dias, a mais próxima em valor primeiro.
+              </p>
+            </div>
+            <select name="expense_id" class="select w-full max-w-md" required>
+              <option value="">Escolha a despesa…</option>
+              <option :for={candidate <- @candidates} value={candidate.id}>
+                {reimbursement_label(candidate)}
+              </option>
+            </select>
+            <button type="submit" class="btn btn-warning btn-sm">Ligar como reembolso</button>
+            <.link patch={list_path(assigns)} class="btn btn-ghost btn-sm">Cancelar</.link>
+          </form>
+        </section>
 
         <div id="days" phx-update="stream" class="divide-y divide-base-300">
           <div id="days-empty" class="hidden only:block">
@@ -338,13 +424,43 @@ defmodule CashCadenceWeb.TransactionLive.Index do
               class="grid grid-cols-[3.5rem_1fr_auto_auto] items-center gap-3 px-4 py-2 text-sm hover:bg-base-200/40 md:grid-cols-[3.5rem_14rem_1fr_8rem_auto]"
             >
               <span class="font-mono text-xs text-base-content/50">{short_date(transaction.date)}</span>
-              <span class="flex flex-wrap items-center gap-1"><.category_chip category={
-                transaction.category
-              } /></span>
+              <span class="flex flex-wrap items-center gap-1">
+                <.category_chip category={transaction.category} />
+                <.badge :if={overridden?(transaction)} kind={:neutral}>
+                  comp. {month_short(transaction.competence)}
+                </.badge>
+                <.badge :if={transaction.reimbursement_of} kind={:accent}>
+                  <.icon name="hero-arrow-uturn-left-micro" class="size-3" />
+                  reembolso de {reimbursement_label(transaction.reimbursement_of)}
+                </.badge>
+                <.badge :if={Money.positive?(reimbursed_total(transaction))} kind={:paid}>
+                  reembolsado {amount(reimbursed_total(transaction))}
+                </.badge>
+              </span>
               <span class="hidden truncate text-base-content/70 md:block">{transaction.description ||
                 "—"}</span>
               <.money value={transaction.amount} kind={transaction.kind} class="text-right" />
               <span class="flex items-center gap-1 text-base-content/50">
+                <.link
+                  :if={transaction.kind == :income and is_nil(transaction.reimbursement_of_id)}
+                  patch={list_path(assigns, %{"reimburse" => transaction.id})}
+                  class="btn btn-ghost btn-xs btn-square"
+                  aria-label="É reembolso"
+                  title="É reembolso de uma despesa"
+                >
+                  <.icon name="hero-arrow-uturn-left-micro" class="size-4" />
+                </.link>
+                <button
+                  :if={transaction.reimbursement_of_id}
+                  type="button"
+                  phx-click="unlink_reimbursement"
+                  phx-value-id={transaction.id}
+                  class="btn btn-ghost btn-xs btn-square"
+                  aria-label="Desfazer reembolso"
+                  title="Desfazer reembolso"
+                >
+                  <.icon name="hero-x-mark-micro" class="size-4" />
+                </button>
                 <.link
                   patch={list_path(assigns, %{"edit" => transaction.id})}
                   class="btn btn-ghost btn-xs btn-square"
@@ -370,6 +486,10 @@ defmodule CashCadenceWeb.TransactionLive.Index do
         <footer class="flex flex-wrap items-center justify-end gap-6 border-t border-base-300 bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
           <span>Receitas <b class="tabular text-income">{amount(@totals.income, signed: true)}</b></span>
           <span>Despesas <b class="tabular text-base-content">{amount(@totals.expense)}</b></span>
+          <span :if={Money.positive?(@totals.reimbursed)}>
+            já descontados <b class="tabular text-base-content">{amount(@totals.reimbursed)}</b>
+            de reembolsos
+          </span>
           <span>Saldo do mês <b class="tabular text-base text-base-content">{brl(@totals.net)}</b></span>
         </footer>
       </section>

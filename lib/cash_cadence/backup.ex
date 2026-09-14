@@ -42,6 +42,32 @@ defmodule CashCadence.Backup do
 
   def read!(path), do: path |> File.read!() |> Jason.decode!()
 
+  def list_files(dir) do
+    case File.ls(dir) do
+      {:ok, names} ->
+        names
+        |> Enum.filter(
+          &(String.starts_with?(&1, "cashcadence-") and String.ends_with?(&1, ".json"))
+        )
+        |> Enum.map(fn name ->
+          path = Path.join(dir, name)
+          %File.Stat{size: size, mtime: mtime} = File.stat!(path, time: :posix)
+          %{name: name, path: path, size: size, modified_at: DateTime.from_unix!(mtime)}
+        end)
+        |> Enum.sort_by(& &1.name, :desc)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  def rotate!(dir, keep) when is_integer(keep) and keep > 0 do
+    dir
+    |> list_files()
+    |> Enum.drop(keep)
+    |> Enum.each(&File.rm!(&1.path))
+  end
+
   def restore(%{"app" => "CashCadence", "version" => @version, "tables" => tables})
       when is_map(tables) do
     Repo.transaction(fn ->

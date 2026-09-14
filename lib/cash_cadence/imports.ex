@@ -3,7 +3,7 @@ defmodule CashCadence.Imports do
 
   import Ecto.Query, warn: false
 
-  alias CashCadence.{Budgets, Classifier}
+  alias CashCadence.{Budgets, Classifier, Settings}
   alias CashCadence.Imports.{Batch, InboxItem, Normalizer, Sniffer}
   alias CashCadence.Ledger
   alias CashCadence.Ledger.{BankAccount, Transaction}
@@ -11,6 +11,7 @@ defmodule CashCadence.Imports do
 
   @match_window_days 3
   @transfer_window_days 2
+  @reimbursement_window_days 45
 
   def ingest_file(path, opts \\ []) do
     ingest_binary(File.read!(path), Path.basename(path), opts)
@@ -58,11 +59,28 @@ defmodule CashCadence.Imports do
         |> Repo.update!()
         |> Repo.preload(:bank_account)
       end)
+      |> maybe_auto_approve()
     else
       %Batch{} = batch -> {:error, {:already_imported, batch}}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp maybe_auto_approve({:ok, batch}) do
+    if Settings.auto_approve?() do
+      approved = approve_high_confidence(%{batch_id: batch.id})
+
+      batch
+      |> Ecto.Changeset.change(counts: Map.put(batch.counts, "auto_approved", approved))
+      |> Repo.update!()
+
+      {:ok, get_batch!(batch.id)}
+    else
+      {:ok, batch}
+    end
+  end
+
+  defp maybe_auto_approve(error), do: error
 
   defp empty_counts,
     do: %{
@@ -120,6 +138,7 @@ defmodule CashCadence.Imports do
     match = find_match(raw)
     {kind, counterpart, counterpart_item} = transfer_link(raw, account_id)
     transfer? = not is_nil(counterpart) or not is_nil(counterpart_item)
+    reimbursement = reimbursement_candidate(kind, raw)
 
     %{
       batch_id: batch.id,
@@ -139,12 +158,38 @@ defmodule CashCadence.Imports do
       match_transaction_id: id_of(match),
       counterpart_transaction_id: id_of(counterpart),
       flags:
-        flags(match, transfer?, known_fingerprint?(fingerprint), suggestion.category_id, kind),
+        flags(
+          match,
+          transfer?,
+          known_fingerprint?(fingerprint),
+          suggestion.category_id,
+          kind,
+          reimbursement
+        ),
       payload:
         raw.payload
         |> put_counterpart_item(counterpart_item)
         |> put_classification(suggestion)
+        |> put_reimbursement(reimbursement)
     }
+  end
+
+  defp reimbursement_candidate(:income, raw),
+    do: Ledger.find_reimbursement_candidate(raw.amount, raw.date, @reimbursement_window_days)
+
+  defp reimbursement_candidate(_kind, _raw), do: nil
+
+  defp put_reimbursement(payload, nil), do: payload
+
+  defp put_reimbursement(payload, expense) do
+    payload
+    |> Map.put("reimbursement_of_id", expense.id)
+    |> Map.put("reimbursement_date", Date.to_iso8601(expense.date))
+    |> Map.put(
+      "reimbursement_description",
+      expense.description || (expense.category && expense.category.name) ||
+        "despesa sem descrição"
+    )
   end
 
   defp statement_competence(parsed, %BankAccount{
@@ -304,10 +349,11 @@ defmodule CashCadence.Imports do
     )
   end
 
-  defp flags(match, transfer?, possible_duplicate?, suggested_category_id, kind) do
+  defp flags(match, transfer?, possible_duplicate?, suggested_category_id, kind, reimbursement) do
     [
       {match != nil, "match"},
       {transfer?, "transfer"},
+      {reimbursement != nil, "reimbursement"},
       {possible_duplicate?, "possible_duplicate"},
       {is_nil(suggested_category_id) and kind != :transfer, "uncategorized"}
     ]
@@ -420,6 +466,7 @@ defmodule CashCadence.Imports do
           "import_batch_id" => item.batch_id
         }
         |> maybe_put_category(attrs)
+        |> maybe_put_reimbursement(attrs, item)
 
       case Ledger.create_transaction(transaction_attrs) do
         {:ok, transaction} ->
@@ -472,6 +519,15 @@ defmodule CashCadence.Imports do
   end
 
   defp plan_installments(_item, _transaction), do: :ok
+
+  defp maybe_put_reimbursement(transaction_attrs, %{"link_reimbursement" => flag}, %InboxItem{
+         payload: %{"reimbursement_of_id" => expense_id}
+       })
+       when flag in ["true", "on"] do
+    Map.put(transaction_attrs, "reimbursement_of_id", expense_id)
+  end
+
+  defp maybe_put_reimbursement(transaction_attrs, _attrs, _item), do: transaction_attrs
 
   defp approved_date(value, item) do
     with true <- is_binary(value) and String.trim(value) != "",

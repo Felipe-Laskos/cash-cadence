@@ -12,6 +12,7 @@ defmodule CashCadence.Application do
       CashCadence.Repo,
       {DNSCluster, query: Application.get_env(:cash_cadence, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: CashCadence.PubSub},
+      CashCadence.Backup.Scheduler,
       # Start a worker by calling: CashCadence.Worker.start_link(arg)
       # {CashCadence.Worker, arg},
       # Start to serve requests, typically the last entry

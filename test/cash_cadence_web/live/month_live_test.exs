@@ -63,4 +63,26 @@ defmodule CashCadenceWeb.MonthLiveTest do
       assert html =~ month_title(Date.utc_today())
     end
   end
+
+  describe "upcoming bills" do
+    setup :register_and_log_in_user
+
+    test "warns about bills due soon and overdue in the current month", %{conn: conn} do
+      today = Date.utc_today()
+      soon_day = if today.day <= 25, do: today.day + 3, else: today.day
+      recurring_bill_fixture(%{name: "Internet", expected_amount: "99.90", due_day: soon_day})
+
+      if today.day > 1 do
+        recurring_bill_fixture(%{name: "Aluguel", expected_amount: "1000.00", due_day: 1})
+      end
+
+      {:ok, view, html} = live(conn, ~p"/")
+      assert has_element?(view, "#upcoming-bills", "Internet")
+      assert html =~ "dia #{soon_day}"
+      if today.day > 1, do: assert(has_element?(view, "#upcoming-bills", "Atrasadas"))
+
+      {:ok, view, _html} = live(conn, ~p"/?m=2026-01")
+      refute has_element?(view, "#upcoming-bills")
+    end
+  end
 end

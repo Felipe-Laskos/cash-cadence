@@ -28,6 +28,8 @@ defmodule CashCadence.Ledger.Transaction do
     belongs_to :category, Category
     belongs_to :bank_account, BankAccount
     belongs_to :reimbursement_of, __MODULE__
+    has_many :reimbursements, __MODULE__, foreign_key: :reimbursement_of_id
+    field :competence_month, :string, virtual: true
     belongs_to :import_batch, CashCadence.Imports.Batch
 
     timestamps(type: :utc_datetime)
@@ -53,10 +55,13 @@ defmodule CashCadence.Ledger.Transaction do
       :category_id,
       :bank_account_id,
       :reimbursement_of_id,
-      :category_name
+      :category_name,
+      :competence_month
     ])
     |> update_change(:description, &blank_to_nil/1)
+    |> put_competence_month()
     |> validate_required([:date, :kind, :amount])
+    |> validate_reimbursement()
     |> validate_number(:amount, greater_than: 0)
     |> validate_length(:description, max: 255)
     |> put_competence()
@@ -67,6 +72,26 @@ defmodule CashCadence.Ledger.Transaction do
       message: "deve ser maior que zero"
     )
     |> unique_constraint([:source, :external_id])
+  end
+
+  defp put_competence_month(changeset) do
+    case get_change(changeset, :competence_month) do
+      nil -> changeset
+      "" -> changeset
+      value -> put_parsed_month(changeset, Date.from_iso8601(value <> "-01"))
+    end
+  end
+
+  defp put_parsed_month(changeset, {:ok, date}),
+    do: put_change(changeset, :competence, Date.beginning_of_month(date))
+
+  defp put_parsed_month(changeset, _error),
+    do: add_error(changeset, :competence_month, "mês inválido")
+
+  defp validate_reimbursement(changeset) do
+    if get_field(changeset, :reimbursement_of_id) && get_field(changeset, :kind) != :income,
+      do: add_error(changeset, :reimbursement_of_id, "só uma receita pode ser reembolso"),
+      else: changeset
   end
 
   defp put_competence(changeset) do

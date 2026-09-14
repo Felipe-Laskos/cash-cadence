@@ -41,8 +41,14 @@ defmodule Mix.Tasks.Cash.Import do
 
   defp describe(counts) do
     "#{counts["total"]} transações · #{counts["new"]} novas na caixa de entrada · #{counts["duplicates"]} já conhecidas · " <>
-      "#{counts["matched"]} casam com lançamentos manuais · #{counts["transfers"]} parecem transferência"
+      "#{counts["matched"]} casam com lançamentos manuais · #{counts["transfers"]} parecem transferência" <>
+      auto_approved(counts["auto_approved"])
   end
+
+  defp auto_approved(count) when is_integer(count) and count > 0,
+    do: " · #{count} aprovadas automaticamente"
+
+  defp auto_approved(_count), do: ""
 
   defp explain(:unknown_format),
     do: "formato não reconhecido (aceito: OFX, CSV do Nubank, PDF do Itaú)"

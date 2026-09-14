@@ -153,12 +153,67 @@ defmodule CashCadence.Ledger do
     |> filter_category(filters[:category_id])
     |> filter_search(filters[:search])
     |> order_by([t], desc: t.date, desc: t.id)
-    |> preload(:category)
+    |> preload([:category, reimbursement_of: :category, reimbursements: ^active_transactions()])
     |> Repo.all()
   end
 
   def get_transaction!(id) do
-    active_transactions() |> preload(:category) |> Repo.get!(id)
+    active_transactions()
+    |> preload([:category, reimbursement_of: :category, reimbursements: ^active_transactions()])
+    |> Repo.get!(id)
+  end
+
+  def link_reimbursement(%Transaction{kind: :income, id: income_id} = income, %Transaction{
+        kind: :expense,
+        id: expense_id
+      })
+      when income_id != expense_id do
+    income |> Ecto.Changeset.change(reimbursement_of_id: expense_id) |> Repo.update()
+  end
+
+  def link_reimbursement(_income, _expense), do: {:error, :invalid_pair}
+
+  def unlink_reimbursement(%Transaction{} = income) do
+    income |> Ecto.Changeset.change(reimbursement_of_id: nil) |> Repo.update()
+  end
+
+  def reimbursement_candidates(%Transaction{} = income, days \\ 60) do
+    from_date = Date.add(income.date, -days)
+
+    active_transactions()
+    |> where(
+      [t],
+      t.kind == :expense and t.date >= ^from_date and t.date <= ^income.date and
+        t.id != ^income.id
+    )
+    |> order_by([t],
+      asc: fragment("abs(? - ?)", t.amount, type(^income.amount, :decimal)),
+      desc: t.date
+    )
+    |> limit(12)
+    |> preload(:category)
+    |> Repo.all()
+  end
+
+  def find_reimbursement_candidate(%Decimal{} = amount, %Date{} = date, days) do
+    from_date = Date.add(date, -days)
+
+    Repo.one(
+      from t in Transaction,
+        as: :expense,
+        where:
+          is_nil(t.deleted_at) and t.kind == :expense and t.amount == ^amount and
+            t.date >= ^from_date and t.date <= ^date,
+        where:
+          not exists(
+            from r in Transaction,
+              where: r.reimbursement_of_id == parent_as(:expense).id and is_nil(r.deleted_at),
+              select: 1
+          ),
+        order_by: [desc: t.date, desc: t.id],
+        limit: 1,
+        preload: :category
+    )
   end
 
   def create_transaction(attrs) do
@@ -192,25 +247,34 @@ defmodule CashCadence.Ledger do
   def all_time_totals, do: totals(active_transactions())
 
   defp totals(query) do
-    rows =
-      Repo.all(
+    row =
+      Repo.one(
         from t in query,
-          where: t.kind in [:income, :expense],
-          group_by: t.kind,
-          select: {t.kind, sum(t.amount), count(t.id)}
+          select: %{
+            income: sum(t.amount) |> filter(t.kind == :income and is_nil(t.reimbursement_of_id)),
+            income_count:
+              count(t.id) |> filter(t.kind == :income and is_nil(t.reimbursement_of_id)),
+            expense: sum(t.amount) |> filter(t.kind == :expense),
+            expense_count: count(t.id) |> filter(t.kind == :expense),
+            reimbursed:
+              sum(t.amount) |> filter(t.kind == :income and not is_nil(t.reimbursement_of_id))
+          }
       )
 
-    by_kind = Map.new(rows, fn {kind, sum, count} -> {kind, {sum || Money.zero(), count}} end)
-    {income, income_count} = Map.get(by_kind, :income, {Money.zero(), 0})
-    {expense, expense_count} = Map.get(by_kind, :expense, {Money.zero(), 0})
+    income = row.income || Money.zero()
+    gross = row.expense || Money.zero()
+    reimbursed = row.reimbursed || Money.zero()
+    expense = Decimal.sub(gross, reimbursed)
 
     %{
       income: income,
       expense: expense,
+      gross_expense: gross,
+      reimbursed: reimbursed,
       net: Decimal.sub(income, expense),
-      count: income_count + expense_count,
-      income_count: income_count,
-      expense_count: expense_count
+      count: row.income_count + row.expense_count,
+      income_count: row.income_count,
+      expense_count: row.expense_count
     }
   end
 
@@ -224,21 +288,29 @@ defmodule CashCadence.Ledger do
     from = Date.beginning_of_month(from)
     to = Date.beginning_of_month(to)
 
-    rows =
+    sums =
       Repo.all(
         from t in active_transactions(),
           where: t.competence >= ^from and t.competence <= ^to and t.kind in [:income, :expense],
-          group_by: [t.competence, t.kind],
-          select: {t.competence, t.kind, sum(t.amount)}
+          group_by: t.competence,
+          select:
+            {t.competence,
+             sum(t.amount) |> filter(t.kind == :income and is_nil(t.reimbursement_of_id)),
+             sum(t.amount) |> filter(t.kind == :expense),
+             sum(t.amount) |> filter(t.kind == :income and not is_nil(t.reimbursement_of_id))}
       )
-
-    sums = Map.new(rows, fn {competence, kind, sum} -> {{competence, kind}, sum} end)
+      |> Map.new(fn {competence, income, expense, reimbursed} ->
+        {competence,
+         {income || Money.zero(), expense || Money.zero(), reimbursed || Money.zero()}}
+      end)
 
     from
     |> months_until(to)
     |> Enum.map(fn month ->
-      income = Map.get(sums, {month, :income}, Money.zero())
-      expense = Map.get(sums, {month, :expense}, Money.zero())
+      {income, gross, reimbursed} =
+        Map.get(sums, month, {Money.zero(), Money.zero(), Money.zero()})
+
+      expense = Decimal.sub(gross, reimbursed)
       %{competence: month, income: income, expense: expense, net: Decimal.sub(income, expense)}
     end)
   end
@@ -251,12 +323,21 @@ defmodule CashCadence.Ledger do
   end
 
   def expenses_by_category(%Date{} = competence) do
+    month = Date.beginning_of_month(competence)
+
+    refunds =
+      month
+      |> reimbursements_by_original_category(month)
+      |> Enum.group_by(fn {category_id, _competence, _sum} -> category_id end)
+      |> Map.new(fn {category_id, cells} ->
+        {category_id, cells |> Enum.map(&elem(&1, 2)) |> Money.sum()}
+      end)
+
     Repo.all(
       from t in active_transactions(),
         left_join: c in assoc(t, :category),
-        where: t.competence == ^Date.beginning_of_month(competence) and t.kind == :expense,
+        where: t.competence == ^month and t.kind == :expense,
         group_by: [c.id, c.name, c.color],
-        order_by: [desc: sum(t.amount)],
         select: %{
           category_id: c.id,
           name: c.name,
@@ -264,6 +345,22 @@ defmodule CashCadence.Ledger do
           total: sum(t.amount),
           count: count(t.id)
         }
+    )
+    |> Enum.map(
+      &%{&1 | total: Decimal.sub(&1.total, Map.get(refunds, &1.category_id, Money.zero()))}
+    )
+    |> Enum.filter(&Money.positive?(&1.total))
+    |> Enum.sort_by(&Decimal.to_float(&1.total), :desc)
+  end
+
+  defp reimbursements_by_original_category(%Date{} = from, %Date{} = to) do
+    Repo.all(
+      from t in active_transactions(),
+        join: o in Transaction,
+        on: o.id == t.reimbursement_of_id,
+        where: t.kind == :income and t.competence >= ^from and t.competence <= ^to,
+        group_by: [o.category_id, t.competence],
+        select: {o.category_id, t.competence, sum(t.amount)}
     )
   end
 
@@ -277,7 +374,10 @@ defmodule CashCadence.Ledger do
 
   def count_uncategorized do
     active_transactions()
-    |> where([t], is_nil(t.category_id) and t.kind != :transfer)
+    |> where(
+      [t],
+      is_nil(t.category_id) and t.kind != :transfer and is_nil(t.reimbursement_of_id)
+    )
     |> Repo.aggregate(:count)
   end
 
@@ -286,7 +386,7 @@ defmodule CashCadence.Ledger do
     |> where(
       [t],
       t.competence == ^Date.beginning_of_month(competence) and is_nil(t.category_id) and
-        t.kind != :transfer
+        t.kind != :transfer and is_nil(t.reimbursement_of_id)
     )
     |> Repo.aggregate(:count)
   end
@@ -310,11 +410,21 @@ defmodule CashCadence.Ledger do
           }
       )
 
+    refunds =
+      from
+      |> reimbursements_by_original_category(to)
+      |> Map.new(fn {category_id, competence, sum} -> {{category_id, competence}, sum} end)
+
     rows
     |> Enum.group_by(&{&1.category_id, &1.name})
     |> Enum.map(fn {{category_id, name}, cells} ->
-      totals = Map.new(cells, &{&1.competence, &1.total})
-      total = cells |> Enum.map(& &1.total) |> Money.sum()
+      totals =
+        Map.new(cells, fn cell ->
+          refund = Map.get(refunds, {category_id, cell.competence}, Money.zero())
+          {cell.competence, Decimal.sub(cell.total, refund)}
+        end)
+
+      total = totals |> Map.values() |> Money.sum()
 
       %{
         category_id: category_id,
@@ -336,7 +446,8 @@ defmodule CashCadence.Ledger do
           left_join: c in assoc(t, :category),
           where:
             t.competence >= ^Date.beginning_of_month(from) and
-              t.competence <= ^Date.beginning_of_month(to) and t.kind == :income,
+              t.competence <= ^Date.beginning_of_month(to) and t.kind == :income and
+              is_nil(t.reimbursement_of_id),
           group_by: [c.id, c.name, c.kind],
           order_by: [desc: sum(t.amount)],
           select: %{

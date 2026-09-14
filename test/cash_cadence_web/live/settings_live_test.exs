@@ -126,4 +126,24 @@ defmodule CashCadenceWeb.SettingsLiveTest do
     assert account.competence_mode == :statement_month
     assert has_element?(view, "#account-#{account.id}", "mês da fatura")
   end
+
+  test "toggles automatic approval and runs a backup on demand", %{conn: conn} do
+    dir = CashCadence.Backup.Scheduler.config() |> Keyword.fetch!(:dir)
+    File.rm_rf!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    {:ok, view, html} = live(conn, ~p"/configuracoes")
+    assert html =~ "Backup automático desligado"
+    assert html =~ "Nenhum backup automático gravado ainda."
+    refute CashCadence.Settings.auto_approve?()
+
+    view |> element("#auto-approve") |> render_click()
+    assert render(view) =~ "passam a ser aprovados na importação"
+    assert CashCadence.Settings.auto_approve?()
+
+    view |> element("#auto-backup button", "Fazer backup agora") |> render_click()
+    assert render(view) =~ "Backup gravado em"
+    assert [_file] = CashCadence.Backup.list_files(dir)
+    assert has_element?(view, "#auto-backup li", "cashcadence-")
+  end
 end

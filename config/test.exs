@@ -27,6 +27,8 @@ config :cash_cadence, CashCadenceWeb.Endpoint,
 # In test we don't send emails
 config :cash_cadence, CashCadence.Mailer, adapter: Swoosh.Adapters.Test
 
+config :cash_cadence, :backup, enabled: false, dir: "tmp/test-backups", keep: 3
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

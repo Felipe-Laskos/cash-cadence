@@ -336,6 +336,28 @@ defmodule CashCadenceWeb.InboxLive do
                 <span>Parece transferência entre suas contas: o outro lado também está na caixa de entrada.</span>
               </div>
               <div
+                :if={item.payload["reimbursement_of_id"]}
+                class="alert alert-info alert-soft py-2 text-sm"
+              >
+                <.icon name="hero-arrow-uturn-left-micro" class="size-4" />
+                <label class="flex flex-wrap items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="item[link_reimbursement]"
+                    value="true"
+                    checked
+                    class="checkbox checkbox-sm"
+                  />
+                  <span>
+                    Parece reembolso da despesa <b>{item.payload["reimbursement_description"]} · {item.payload[
+                      "reimbursement_date"
+                    ]
+                    |> Date.from_iso8601!()
+                    |> short_date()}</b>. Marcado, abate da despesa em vez de contar como receita.
+                  </span>
+                </label>
+              </div>
+              <div
                 :if={"possible_duplicate" in item.flags}
                 class="alert alert-warning alert-soft py-2 text-sm"
               >

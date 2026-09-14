@@ -139,6 +139,12 @@ defmodule CashCadenceWeb.BillLive.Index do
     {:noreply, reload(socket)}
   end
 
+  defp due_soon?(%{due_in: due_in}), do: is_integer(due_in) and due_in >= 0 and due_in <= 7
+
+  defp due_soon_label(0), do: "vence hoje"
+  defp due_soon_label(1), do: "vence amanhã"
+  defp due_soon_label(days), do: "vence em #{days} dias"
+
   defp status_text(%{status: :paid, over: over}) do
     if Money.positive?(over), do: "Pago · #{amount(over)} acima", else: "Pago"
   end
@@ -339,6 +345,7 @@ defmodule CashCadenceWeb.BillLive.Index do
                 <td class="text-base-content/60">
                   {if item.due_on, do: "dia #{item.due_on.day}", else: "—"}
                   <.badge :if={item.overdue?} kind={:unpaid}>atrasada</.badge>
+                  <.badge :if={due_soon?(item)} kind={:warn}>{due_soon_label(item.due_in)}</.badge>
                 </td>
                 <td class="tabular text-right">{amount(item.expected)}</td>
                 <td class="tabular text-right">{amount(item.paid)}</td>

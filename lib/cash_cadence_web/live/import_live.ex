@@ -54,18 +54,23 @@ defmodule CashCadenceWeb.ImportLive do
     {imported, rest} = Enum.split_with(results, &match?({_, {:ok, _}}, &1))
     batches = Enum.map(imported, fn {_, {:ok, batch}} -> batch end)
     new_items = batches |> Enum.map(& &1.counts["new"]) |> Enum.sum()
+    auto_approved = batches |> Enum.map(&(&1.counts["auto_approved"] || 0)) |> Enum.sum()
+    pending = new_items - auto_approved
     warnings = batches |> Enum.map(&length(&1.warnings)) |> Enum.sum()
 
     socket =
       socket
       |> assign(batches: Imports.list_batches(), inbox_count: Imports.count_pending())
-      |> put_flash(flash_kind(imported, rest), summary(imported, rest, new_items, warnings))
+      |> put_flash(
+        flash_kind(imported, rest),
+        summary(imported, rest, new_items, warnings, auto_approved)
+      )
 
     case batches do
-      [batch] when new_items > 0 ->
+      [batch] when pending > 0 ->
         {:noreply, push_navigate(socket, to: ~p"/entrada?#{%{"batch" => batch.id}}")}
 
-      _ when new_items > 0 ->
+      _ when pending > 0 ->
         {:noreply, push_navigate(socket, to: ~p"/entrada")}
 
       _ ->
@@ -80,11 +85,13 @@ defmodule CashCadenceWeb.ImportLive do
   defp flash_kind([], _rest), do: :error
   defp flash_kind(_imported, _rest), do: :info
 
-  defp summary(imported, rest, new_items, warnings) do
+  defp summary(imported, rest, new_items, warnings, auto_approved) do
     parts =
       [
         imported != [] &&
           "#{length(imported)} #{plural(length(imported), "arquivo lido", "arquivos lidos")}, #{new_items} #{plural(new_items, "item novo", "itens novos")} na caixa de entrada",
+        auto_approved > 0 &&
+          "#{auto_approved} #{plural(auto_approved, "aprovado automaticamente", "aprovados automaticamente")}",
         warnings > 0 && "#{warnings} #{plural(warnings, "alerta", "alertas")} para conferir"
       ] ++ Enum.map(rest, &failure/1)
 

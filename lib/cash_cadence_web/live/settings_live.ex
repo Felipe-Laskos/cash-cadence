@@ -1,7 +1,7 @@
 defmodule CashCadenceWeb.SettingsLive do
   use CashCadenceWeb, :live_view
 
-  alias CashCadence.{Classifier, Imports, Ledger}
+  alias CashCadence.{Backup, Classifier, Imports, Ledger, Settings}
   alias CashCadence.Classifier.Rule
   alias CashCadence.Ledger.BankAccount
 
@@ -95,7 +95,11 @@ defmodule CashCadenceWeb.SettingsLive do
       accounts: Ledger.list_bank_accounts(),
       last_batch: List.first(Imports.list_batches(1)),
       pending_count: Imports.count_pending(),
-      suggestions: Ledger.category_suggestions()
+      suggestions: Ledger.category_suggestions(),
+      auto_approve: Settings.auto_approve?(),
+      backup: Backup.Scheduler.config(),
+      backup_files:
+        Backup.Scheduler.config() |> Keyword.fetch!(:dir) |> Backup.list_files() |> Enum.take(5)
     )
   end
 
@@ -153,6 +157,23 @@ defmodule CashCadenceWeb.SettingsLive do
 
   def handle_event("reclassify", _params, socket),
     do: {:noreply, socket |> put_flash(:info, reclassified()) |> reload()}
+
+  def handle_event("toggle_auto_approve", _params, socket) do
+    enabled = not socket.assigns.auto_approve
+    :ok = Settings.set_auto_approve(enabled)
+
+    message =
+      if enabled,
+        do: "Itens de confiança alta e sem alertas passam a ser aprovados na importação.",
+        else: "Tudo que chegar vai esperar sua revisão na caixa de entrada."
+
+    {:noreply, socket |> put_flash(:info, message) |> reload()}
+  end
+
+  def handle_event("backup_now", _params, socket) do
+    {:ok, path} = Backup.Scheduler.run_now()
+    {:noreply, socket |> put_flash(:info, "Backup gravado em #{path}.") |> reload()}
+  end
 
   def handle_event("validate_account", %{"bank_account" => params}, socket) do
     changeset =
@@ -226,6 +247,11 @@ defmodule CashCadenceWeb.SettingsLive do
     "#{transactions} #{if transactions == 1, do: "lançamento", else: "lançamentos"} · #{pending} #{if pending == 1, do: "pendente", else: "pendentes"}"
   end
 
+  defp file_size(bytes) when bytes >= 1_048_576, do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+  defp file_size(bytes), do: "#{max(div(bytes, 1024), 1)} KB"
+
+  defp file_date(%DateTime{} = at), do: Calendar.strftime(at, "%d/%m/%Y %H:%M")
+
   defp memory_date(nil), do: "—"
   defp memory_date(%DateTime{} = at), do: Calendar.strftime(at, "%d/%m/%Y")
 
@@ -279,6 +305,19 @@ defmodule CashCadenceWeb.SettingsLive do
                                                                                       "itens aguardam"} revisão</.link>
             </span>
           </p>
+          <label class="mt-4 flex items-start gap-3 text-sm">
+            <input
+              id="auto-approve"
+              type="checkbox"
+              class="toggle toggle-primary toggle-sm mt-0.5"
+              checked={@auto_approve}
+              phx-click="toggle_auto_approve"
+            />
+            <span>
+              <b>Aprovar automaticamente na importação</b>
+              os itens de confiança alta e sem alertas: regra ou fixa casada, ou descrição já aprovada duas vezes. Duplicatas, transferências e reembolsos prováveis continuam esperando você.
+            </span>
+          </label>
         </.card>
 
         <.card
@@ -630,6 +669,38 @@ defmodule CashCadenceWeb.SettingsLive do
           <p class="mt-2 text-sm text-base-content/60">
             Para restaurar, na pasta do projeto: <code class="font-mono text-xs">mix cash.restore ARQUIVO.json --yes</code>. Isso substitui todos os dados atuais. Também dá para gerar o arquivo pelo terminal com <code class="font-mono text-xs">mix cash.backup</code>.
           </p>
+          <div id="auto-backup" class="mt-4 rounded-box border border-base-300 p-4 text-sm">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="font-semibold">
+                  Backup automático {if @backup[:enabled], do: "ligado", else: "desligado"}
+                </p>
+                <p class="text-base-content/60">
+                  A cada {@backup[:interval_hours]} horas, enquanto o app estiver aberto, na pasta <code class="font-mono text-xs">{@backup[:dir]}</code>; mantém os últimos {@backup[
+                    :keep
+                  ]} arquivos.
+                  Para gravar direto numa pasta sincronizada com o seu drive, inicie o app com
+                  <code class="font-mono text-xs">CASH_BACKUP_DIR</code>
+                  apontando para ela.
+                </p>
+              </div>
+              <button type="button" phx-click="backup_now" class="btn btn-sm">
+                <.icon name="hero-clock-micro" class="size-4" /> Fazer backup agora
+              </button>
+            </div>
+            <ul
+              :if={@backup_files != []}
+              class="mt-3 space-y-1 font-mono text-xs text-base-content/70"
+            >
+              <li :for={file <- @backup_files} class="flex flex-wrap justify-between gap-2">
+                <span>{file.name}</span>
+                <span>{file_size(file.size)} · {file_date(file.modified_at)}</span>
+              </li>
+            </ul>
+            <p :if={@backup_files == []} class="mt-3 text-base-content/50">
+              Nenhum backup automático gravado ainda.
+            </p>
+          </div>
         </.card>
       </section>
 
