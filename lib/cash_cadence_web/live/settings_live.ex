@@ -708,7 +708,7 @@ defmodule CashCadenceWeb.SettingsLive do
         <.card title="Instalar no celular" subtitle="Funciona como app, sem loja">
           <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/80">
             <li>
-              Abra este endereço no celular, na mesma rede Wi-Fi do computador, usando o IP da máquina e a porta 4000.
+              Abra este endereço no celular, na mesma rede Wi-Fi do computador, usando o IP da máquina e a porta 4747.
             </li>
             <li><b>Android (Chrome)</b>: menu ⋮ → Adicionar à tela inicial.</li>
             <li><b>iPhone (Safari)</b>: compartilhar → Adicionar à Tela de Início.</li>

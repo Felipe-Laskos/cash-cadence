@@ -20,7 +20,7 @@ Pré-requisitos: Elixir 1.18 com OTP 27 e Docker.
 ```bash
 docker compose up -d --wait   # Postgres em localhost:5433
 mix setup                     # dependências, banco, migrações, assets
-mix phx.server                # http://localhost:4000
+mix phx.server                # http://localhost:4747
 ```
 
 Antes de commitar:

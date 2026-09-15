@@ -25,7 +25,7 @@ if backup_dir = System.get_env("CASH_BACKUP_DIR") do
 end
 
 config :cash_cadence, CashCadenceWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [port: String.to_integer(System.get_env("PORT", "4747"))]
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
