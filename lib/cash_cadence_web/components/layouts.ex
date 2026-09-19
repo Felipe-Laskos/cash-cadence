@@ -180,8 +180,8 @@ defmodule CashCadenceWeb.Layouts do
   def flash_group(assigns) do
     ~H"""
     <div id={@id} aria-live="polite">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
+      <.flash kind={:info} flash={@flash} autohide={5000} />
+      <.flash kind={:error} flash={@flash} autohide={8000} />
 
       <.flash
         id="client-error"

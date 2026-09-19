@@ -50,6 +50,11 @@ defmodule CashCadenceWeb.CoreComponents do
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :autohide, :integer,
+    default: nil,
+    doc: "milliseconds until the flash dismisses itself; nil keeps it until dismissed"
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
@@ -62,6 +67,8 @@ defmodule CashCadenceWeb.CoreComponents do
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+      phx-hook=".AutoHide"
+      data-autohide={@autohide}
       role="alert"
       class="toast toast-top toast-end z-50"
       {@rest}
@@ -83,6 +90,46 @@ defmodule CashCadenceWeb.CoreComponents do
         </button>
       </div>
     </div>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".AutoHide">
+      export default {
+        mounted() {
+          this.el.addEventListener("mouseenter", () => this.cancel())
+          this.el.addEventListener("mouseleave", () => this.arm())
+          this.el.addEventListener("focusin", () => this.cancel())
+          this.el.addEventListener("focusout", () => this.arm())
+          this.arm()
+        },
+
+        updated() {
+          this.arm()
+        },
+
+        destroyed() {
+          this.cancel()
+        },
+
+        arm() {
+          this.cancel()
+          const delay = Number(this.el.dataset.autohide)
+          if (delay > 0) {
+            this.timer = setTimeout(() => this.dismiss(), delay)
+          }
+        },
+
+        cancel() {
+          clearTimeout(this.timer)
+          this.timer = null
+        },
+
+        dismiss() {
+          const command = this.el.getAttribute("phx-click")
+          if (command) {
+            this.js().exec(command)
+          }
+        }
+      }
+    </script>
     """
   end
 
