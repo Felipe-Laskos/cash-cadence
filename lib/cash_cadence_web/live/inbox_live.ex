@@ -130,7 +130,7 @@ defmodule CashCadenceWeb.InboxLive do
   defp format_label(:pdf), do: "PDF"
   defp format_label(:image), do: "Foto"
 
-  defp hint_label(%{"itau_category" => category} = payload) do
+  defp hint_label(%{"bank_category" => category} = payload) do
     Enum.join(Enum.reject([category, payload["city"]], &is_nil/1), " · ")
   end
 

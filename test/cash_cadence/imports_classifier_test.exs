@@ -72,4 +72,47 @@ defmodule CashCadence.ImportsClassifierTest do
     assert tax.payload["suggestion_source"] == "rule"
     refute "uncategorized" in tax.flags
   end
+
+  defp store_item,
+    do: Enum.find(Imports.list_inbox(), &Decimal.equal?(&1.amount, Decimal.new("129.90")))
+
+  test "a bank hint rule matches an item imported from Nubank" do
+    electronics = category_fixture(%{name: "Eletrônicos"})
+
+    {:ok, rule} =
+      Classifier.create_rule(%{
+        "pattern" => "eletrônicos",
+        "target" => "bank_hint",
+        "category_id" => electronics.id
+      })
+
+    assert {:ok, _batch} = Imports.ingest_file(fixture("nubank_cartao.csv"))
+
+    store = store_item()
+    assert store.payload["bank_category"] == "eletrônicos"
+    assert store.suggested_category_id == electronics.id
+    assert store.confidence == :high
+    assert store.payload["suggestion_source"] == "rule"
+    assert store.payload["rule_id"] == rule.id
+  end
+
+  test "reclassifying reaches the bank hint of an item imported from Nubank" do
+    assert {:ok, _batch} = Imports.ingest_file(fixture("nubank_cartao.csv"))
+    assert store_item().suggested_category_id == nil
+
+    electronics = category_fixture(%{name: "Eletrônicos"})
+
+    {:ok, _} =
+      Classifier.create_rule(%{
+        "pattern" => "eletrônicos",
+        "target" => "bank_hint",
+        "category_id" => electronics.id
+      })
+
+    assert Imports.reclassify_pending() >= 1
+
+    store = store_item()
+    assert store.suggested_category_id == electronics.id
+    assert store.confidence == :high
+  end
 end

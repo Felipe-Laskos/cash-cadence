@@ -166,7 +166,7 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
   defp put_hint(payload, nil), do: payload
 
   defp put_hint(payload, %{category: category, city: city}) do
-    payload |> Map.put("itau_category", category) |> Map.put("city", city)
+    payload |> Map.put("bank_category", category) |> Map.put("city", city)
   end
 
   defp put_installment(payload, nil), do: payload

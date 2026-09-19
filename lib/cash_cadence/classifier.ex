@@ -105,7 +105,7 @@ defmodule CashCadence.Classifier do
             payload: i.payload
           }
       )
-      |> Enum.map(&%{raw: &1.raw, normalized: &1.normalized, hint: &1.payload["itau_category"]})
+      |> Enum.map(&%{raw: &1.raw, normalized: &1.normalized, hint: &1.payload["bank_category"]})
 
     %{
       transactions: Enum.count(transactions, &matches?(rule, &1)),
