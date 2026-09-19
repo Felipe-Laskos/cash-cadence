@@ -264,17 +264,17 @@ defmodule CashCadenceWeb.MonthLive do
           <.empty_state :if={@slices == []} icon="hero-chart-pie">
             Nenhuma despesa neste mês.
           </.empty_state>
-          <div :if={@slices != []} class="flex items-center gap-5">
+          <div :if={@slices != []} class="flex flex-col gap-5 sm:flex-row sm:items-center">
             <div
               id="category-chart"
               phx-hook="Chart"
               phx-update="ignore"
               data-chart={Jason.encode!(@category_chart)}
-              class="relative size-36 shrink-0"
+              class="relative size-36 shrink-0 self-center"
             >
               <canvas></canvas>
             </div>
-            <ul class="flex-1 space-y-1.5 text-sm">
+            <ul class="min-w-0 flex-1 space-y-1.5 text-sm">
               <li :for={slice <- @slices} class="flex items-center gap-2">
                 <span class="size-2 shrink-0 rounded-full" style={"background: var(#{slice.color})"}></span>
                 <span class="truncate">{slice.name}</span>

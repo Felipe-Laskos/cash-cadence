@@ -332,7 +332,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           phx-change="validate"
           phx-submit={JS.push("save") |> JS.focus(to: "#transaction_category_name")}
           class={[
-            "grid gap-2 border-b border-base-300 p-4 md:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto] md:items-start",
+            "grid gap-2 border-b border-base-300 p-4 md:grid-cols-2 md:items-start lg:grid-cols-[9rem_10rem_1fr_1fr] xl:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto]",
             @editing && "bg-secondary/30"
           ]}
         >

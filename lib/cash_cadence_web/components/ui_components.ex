@@ -262,6 +262,18 @@ defmodule CashCadenceWeb.UIComponents do
   defp good?(up?, :up), do: up?
   defp good?(up?, :down), do: not up?
 
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  def unlabeled_field(assigns) do
+    ~H"""
+    <div class={@class}>
+      <div class="label mb-1" aria-hidden="true">&nbsp;</div>
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
   attr :icon, :string, default: "hero-inbox"
   slot :inner_block, required: true
 

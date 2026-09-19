@@ -245,7 +245,7 @@ defmodule CashCadenceWeb.BillLive.Index do
           id="bill-form"
           phx-change="validate"
           phx-submit="save"
-          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_9rem_1fr_9rem_7rem_auto] md:items-end"
+          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_9rem_1fr_9rem_7rem_auto] md:items-start"
         >
           <.input field={@form[:name]} type="text" label="Nome" placeholder="Ex.: Internet" required />
           <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
@@ -282,12 +282,14 @@ defmodule CashCadenceWeb.BillLive.Index do
             max="31"
             placeholder="—"
           />
-          <div class="flex gap-1">
-            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
-              do: "Salvar",
-              else: "Adicionar"}</.button>
-            <button type="button" phx-click="cancel" class="btn">Cancelar</button>
-          </div>
+          <.unlabeled_field>
+            <div class="flex gap-1">
+              <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
+                do: "Salvar",
+                else: "Adicionar"}</.button>
+              <button type="button" phx-click="cancel" class="btn">Cancelar</button>
+            </div>
+          </.unlabeled_field>
           <div class="grid gap-3 rounded-box border border-base-300 p-3 md:col-span-6 md:grid-cols-[10rem_10rem_7rem_1fr]">
             <p class="text-xs text-base-content/60 md:col-span-4">
               Opcional: vigência e parcelas. Sem vigência, vale todo mês. Com texto no extrato, o pagamento é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria.
@@ -406,27 +408,29 @@ defmodule CashCadenceWeb.BillLive.Index do
           <.empty_state :if={@incomes == []} icon="hero-banknotes">
             Nenhuma receita esperada. Cadastre o salário como recorrência do tipo Receita.
           </.empty_state>
-          <table :if={@incomes != []} class="table table-sm">
-            <thead>
-              <tr>
-                <th>Receita</th><th class="text-right">Esperado</th><th>
-                  {String.capitalize(month_name(@month))}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={income <- @incomes} id={"income-#{income.bill.id}"}>
-                <td class="font-medium">{income.bill.name}</td>
-                <td class="tabular text-right">{amount(income.expected)}</td>
-                <td>
-                  <.badge :if={income.status == :received} kind={:paid}>
-                    Recebido{if income.received_on, do: " em #{short_date(income.received_on)}"}
-                  </.badge>
-                  <.badge :if={income.status == :pending} kind={:neutral}>Sem recebimento</.badge>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div :if={@incomes != []} class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Receita</th><th class="text-right">Esperado</th><th>
+                    {String.capitalize(month_name(@month))}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={income <- @incomes} id={"income-#{income.bill.id}"}>
+                  <td class="font-medium">{income.bill.name}</td>
+                  <td class="tabular text-right">{amount(income.expected)}</td>
+                  <td>
+                    <.badge :if={income.status == :received} kind={:paid}>
+                      Recebido{if income.received_on, do: " em #{short_date(income.received_on)}"}
+                    </.badge>
+                    <.badge :if={income.status == :pending} kind={:neutral}>Sem recebimento</.badge>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </.card>
 
         <.card

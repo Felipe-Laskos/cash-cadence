@@ -159,3 +159,7 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+.grid > .card {
+  min-width: 0;
+}

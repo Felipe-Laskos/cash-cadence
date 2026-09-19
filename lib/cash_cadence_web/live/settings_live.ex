@@ -335,7 +335,7 @@ defmodule CashCadenceWeb.SettingsLive do
             id="account-form"
             phx-change="validate_account"
             phx-submit="save_account"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[1fr_9rem_11rem_11rem_auto_auto] md:items-end"
+            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[1fr_9rem_11rem_11rem_auto_auto] md:items-start"
           >
             <.input
               field={@account_form[:name]}
@@ -352,13 +352,17 @@ defmodule CashCadenceWeb.SettingsLive do
               label="Competência (cartão)"
               options={@competence_modes}
             />
-            <.input field={@account_form[:own]} type="checkbox" label="É minha" />
-            <div class="flex gap-1">
-              <.button variant="primary" phx-disable-with="Salvando…">
-                {if @editing_account && @editing_account.id, do: "Salvar", else: "Adicionar"}
-              </.button>
-              <.link patch={settings_path()} class="btn">Cancelar</.link>
-            </div>
+            <.unlabeled_field>
+              <.input field={@account_form[:own]} type="checkbox" label="É minha" />
+            </.unlabeled_field>
+            <.unlabeled_field>
+              <div class="flex gap-1">
+                <.button variant="primary" phx-disable-with="Salvando…">
+                  {if @editing_account && @editing_account.id, do: "Salvar", else: "Adicionar"}
+                </.button>
+                <.link patch={settings_path()} class="btn">Cancelar</.link>
+              </div>
+            </.unlabeled_field>
           </.form>
           <.empty_state :if={@accounts == []} icon="hero-building-library">
             Nenhuma conta cadastrada. Sem contas, os arquivos importados entram sem vínculo.
@@ -452,7 +456,7 @@ defmodule CashCadenceWeb.SettingsLive do
             id="rule-form"
             phx-change="validate_rule"
             phx-submit="save_rule"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[13rem_11rem_1fr_11rem_12rem] md:items-end"
+            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[13rem_11rem_1fr_11rem_12rem] md:items-start"
           >
             <.input field={@rule_form[:target]} type="select" label="Se" options={@targets} />
             <.input field={@rule_form[:match_kind]} type="select" label="…" options={@match_kinds} />

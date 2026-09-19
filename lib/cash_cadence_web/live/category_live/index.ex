@@ -180,7 +180,7 @@ defmodule CashCadenceWeb.CategoryLive.Index do
           id="category-form"
           phx-change="validate"
           phx-submit="save"
-          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_10rem_8rem_auto_auto] md:items-end"
+          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_10rem_8rem_auto_auto] md:items-start"
         >
           <.input field={@form[:name]} type="text" label="Nome" placeholder="Ex.: Mercado" required />
           <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
@@ -191,13 +191,17 @@ defmodule CashCadenceWeb.CategoryLive.Index do
             value={@form[:color].value || "#67b5e1"}
             class="input h-10 w-full p-1"
           />
-          <.input field={@form[:fixed]} type="checkbox" label="Despesa fixa" />
-          <div class="flex gap-1">
-            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
-              do: "Salvar",
-              else: "Adicionar"}</.button>
-            <button type="button" phx-click="cancel" class="btn">Cancelar</button>
-          </div>
+          <.unlabeled_field>
+            <.input field={@form[:fixed]} type="checkbox" label="Despesa fixa" />
+          </.unlabeled_field>
+          <.unlabeled_field>
+            <div class="flex gap-1">
+              <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
+                do: "Salvar",
+                else: "Adicionar"}</.button>
+              <button type="button" phx-click="cancel" class="btn">Cancelar</button>
+            </div>
+          </.unlabeled_field>
         </.form>
       </section>
 
@@ -224,11 +228,11 @@ defmodule CashCadenceWeb.CategoryLive.Index do
         </form>
       </section>
 
-      <div class="join">
+      <div class="join max-w-full overflow-x-auto">
         <.link
           :for={{tab, label} <- @tabs}
           patch={categories_path(%{tab: tab})}
-          class={["btn btn-sm join-item", @tab == tab && "btn-active"]}
+          class={["btn btn-sm join-item whitespace-nowrap", @tab == tab && "btn-active"]}
         >
           {label} · {@counts[tab]}
         </.link>

@@ -236,24 +236,26 @@ defmodule CashCadenceWeb.ReportLive do
           <.empty_state :if={@incomes == []} icon="hero-banknotes">
             Nenhuma receita no período.
           </.empty_state>
-          <table :if={@incomes != []} class="table table-sm">
-            <tbody>
-              <tr :for={income <- @incomes}>
-                <td>
-                  <span :if={income.name}>{income.name}</span>
-                  <span
-                    :if={income.kind == :person}
-                    class="text-[10px] uppercase text-base-content/50"
-                  > pessoa</span>
-                  <.badge :if={!income.name} kind={:warn}>Sem categoria</.badge>
-                </td>
-                <td class="tabular text-right">{amount(income.total)}</td>
-                <td class="tabular w-16 text-right text-base-content/60">
-                  {if income.share, do: income.share |> Decimal.mult(100) |> percent(), else: "—"}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div :if={@incomes != []} class="overflow-x-auto">
+            <table class="table table-sm">
+              <tbody>
+                <tr :for={income <- @incomes}>
+                  <td>
+                    <span :if={income.name}>{income.name}</span>
+                    <span
+                      :if={income.kind == :person}
+                      class="text-[10px] uppercase text-base-content/50"
+                    > pessoa</span>
+                    <.badge :if={!income.name} kind={:warn}>Sem categoria</.badge>
+                  </td>
+                  <td class="tabular text-right">{amount(income.total)}</td>
+                  <td class="tabular w-16 text-right text-base-content/60">
+                    {if income.share, do: income.share |> Decimal.mult(100) |> percent(), else: "—"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </.card>
       </div>
     </Layouts.app>
