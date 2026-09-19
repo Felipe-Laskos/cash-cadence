@@ -71,4 +71,23 @@ defmodule CashCadenceWeb.CategoryLiveTest do
     assert id == upper.id
     assert Ledger.get_category!(tim.id).archived_at != nil
   end
+
+  test "opens the category and merge forms in modals", %{conn: conn} do
+    tim = category_fixture(%{name: "Tim"})
+
+    {:ok, view, _html} = live(conn, ~p"/categorias")
+    refute has_element?(view, "#category-modal")
+    refute has_element?(view, "#merge-modal")
+
+    {:ok, view, _html} = live(conn, ~p"/categorias?new=1")
+    assert has_element?(view, "#category-modal #category-form")
+
+    view |> element("#category-modal-close") |> render_click()
+    assert_patch(view, ~p"/categorias?tab=expense")
+    refute has_element?(view, "#category-modal")
+
+    {:ok, view, _html} = live(conn, ~p"/categorias?merge=#{tim.id}")
+    assert has_element?(view, "#merge-modal #merge-form")
+    refute has_element?(view, "#category-modal")
+  end
 end

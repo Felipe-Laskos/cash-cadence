@@ -329,41 +329,63 @@ defmodule CashCadenceWeb.SettingsLive do
               <.icon name="hero-plus-micro" class="size-4" /> Nova conta
             </.link>
           </:actions>
-          <.form
+          <.modal
             :if={@account_form}
-            for={@account_form}
-            id="account-form"
-            phx-change="validate_account"
-            phx-submit="save_account"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[1fr_9rem_11rem_11rem_auto_auto] md:items-start"
+            id="account-modal"
+            title={
+              if @editing_account && @editing_account.id,
+                do: "Editar conta bancária",
+                else: "Nova conta bancária"
+            }
+            subtitle="Cada arquivo importado é ligado a uma conta; transferências entre elas ficam fora de receita e despesa"
+            on_cancel={JS.patch(settings_path())}
+            max_width="max-w-2xl"
           >
-            <.input
-              field={@account_form[:name]}
-              type="text"
-              label="Nome"
-              placeholder="Ex.: Itaú conta"
-              required
-            />
-            <.input field={@account_form[:bank]} type="select" label="Banco" options={@banks} />
-            <.input field={@account_form[:kind]} type="select" label="Tipo" options={@account_kinds} />
-            <.input
-              field={@account_form[:competence_mode]}
-              type="select"
-              label="Competência (cartão)"
-              options={@competence_modes}
-            />
-            <.unlabeled_field>
-              <.input field={@account_form[:own]} type="checkbox" label="É minha" />
-            </.unlabeled_field>
-            <.unlabeled_field>
-              <div class="flex gap-1">
+            <.form
+              for={@account_form}
+              id="account-form"
+              phx-change="validate_account"
+              phx-submit="save_account"
+              class="flex min-h-0 flex-1 flex-col"
+            >
+              <.modal_body>
+                <div class="grid gap-x-4 sm:grid-cols-2">
+                  <div class="sm:col-span-2">
+                    <.input
+                      field={@account_form[:name]}
+                      type="text"
+                      label="Nome"
+                      placeholder="Ex.: Itaú conta"
+                      required
+                      data-autofocus
+                    />
+                  </div>
+                  <.input field={@account_form[:bank]} type="select" label="Banco" options={@banks} />
+                  <.input
+                    field={@account_form[:kind]}
+                    type="select"
+                    label="Tipo"
+                    options={@account_kinds}
+                  />
+                  <.input
+                    field={@account_form[:competence_mode]}
+                    type="select"
+                    label="Competência (cartão)"
+                    options={@competence_modes}
+                  />
+                  <div class="sm:col-span-2">
+                    <.input field={@account_form[:own]} type="checkbox" label="É minha" />
+                  </div>
+                </div>
+              </.modal_body>
+              <.modal_footer>
+                <.link patch={settings_path()} class="btn btn-ghost">Cancelar</.link>
                 <.button variant="primary" phx-disable-with="Salvando…">
                   {if @editing_account && @editing_account.id, do: "Salvar", else: "Adicionar"}
                 </.button>
-                <.link patch={settings_path()} class="btn">Cancelar</.link>
-              </div>
-            </.unlabeled_field>
-          </.form>
+              </.modal_footer>
+            </.form>
+          </.modal>
           <.empty_state :if={@accounts == []} icon="hero-building-library">
             Nenhuma conta cadastrada. Sem contas, os arquivos importados entram sem vínculo.
           </.empty_state>
@@ -450,48 +472,68 @@ defmodule CashCadenceWeb.SettingsLive do
               <.icon name="hero-plus-micro" class="size-4" /> Nova regra
             </.link>
           </:actions>
-          <.form
-            :if={@rule_form}
-            for={@rule_form}
-            id="rule-form"
-            phx-change="validate_rule"
-            phx-submit="save_rule"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-2 md:items-end lg:grid-cols-3 2xl:grid-cols-[16rem_11rem_minmax(12rem,1fr)_11rem_12rem]"
+          <.modal
+            :if={@rule_form && !@account_form}
+            id="rule-modal"
+            title={if @editing_rule && @editing_rule.id, do: "Editar regra", else: "Nova regra"}
+            subtitle="Valem antes da memória; a primeira que casar decide a categoria e, se quiser, o tipo"
+            on_cancel={JS.patch(settings_path())}
+            max_width="max-w-2xl"
           >
-            <.input field={@rule_form[:target]} type="select" label="Se" options={@targets} />
-            <.input field={@rule_form[:match_kind]} type="select" label="…" options={@match_kinds} />
-            <.input
-              field={@rule_form[:pattern]}
-              type="text"
-              label="Texto"
-              placeholder="Ex.: POSTO"
-              class="input w-full font-mono"
-              required
-            />
-            <.input
-              field={@rule_form[:category_name]}
-              type="text"
-              label="Categoria"
-              placeholder="Ex.: Combustível"
-              list="settings-category-options"
-              autocomplete="off"
-            />
-            <.input
-              field={@rule_form[:kind_override]}
-              type="select"
-              label="Tipo"
-              options={@kind_overrides}
-            />
-            <div class="flex flex-wrap items-center gap-3 md:col-span-2 lg:col-span-3 2xl:col-span-5">
-              <.input field={@rule_form[:active]} type="checkbox" label="Ativa" />
-              <div class="ml-auto flex gap-1">
+            <.form
+              for={@rule_form}
+              id="rule-form"
+              phx-change="validate_rule"
+              phx-submit="save_rule"
+              class="flex min-h-0 flex-1 flex-col"
+            >
+              <.modal_body>
+                <div class="grid gap-x-4 sm:grid-cols-2">
+                  <.input field={@rule_form[:target]} type="select" label="Se" options={@targets} />
+                  <.input
+                    field={@rule_form[:match_kind]}
+                    type="select"
+                    label="Condição"
+                    options={@match_kinds}
+                  />
+                  <div class="sm:col-span-2">
+                    <.input
+                      field={@rule_form[:pattern]}
+                      type="text"
+                      label="Texto"
+                      placeholder="Ex.: POSTO"
+                      class="input w-full font-mono"
+                      required
+                      data-autofocus
+                    />
+                  </div>
+                  <.input
+                    field={@rule_form[:category_name]}
+                    type="text"
+                    label="Categoria"
+                    placeholder="Ex.: Combustível"
+                    list="settings-category-options"
+                    autocomplete="off"
+                  />
+                  <.input
+                    field={@rule_form[:kind_override]}
+                    type="select"
+                    label="Tipo"
+                    options={@kind_overrides}
+                  />
+                  <div class="sm:col-span-2">
+                    <.input field={@rule_form[:active]} type="checkbox" label="Ativa" />
+                  </div>
+                </div>
+              </.modal_body>
+              <.modal_footer>
+                <.link patch={settings_path()} class="btn btn-ghost">Cancelar</.link>
                 <.button variant="primary" phx-disable-with="Salvando…">
                   {if @editing_rule && @editing_rule.id, do: "Salvar", else: "Adicionar"}
                 </.button>
-                <.link patch={settings_path()} class="btn">Cancelar</.link>
-              </div>
-            </div>
-          </.form>
+              </.modal_footer>
+            </.form>
+          </.modal>
           <.empty_state :if={@rules == []} icon="hero-sparkles">
             Nenhuma regra ainda. Exemplo: se a descrição contém “POSTO”, categoria Combustível.
           </.empty_state>

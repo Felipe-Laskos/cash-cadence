@@ -155,4 +155,21 @@ defmodule CashCadenceWeb.TransactionLiveTest do
     view |> element("button[aria-label='Desfazer reembolso']") |> render_click()
     assert Ledger.get_transaction!(refund.id).reimbursement_of_id == nil
   end
+
+  test "keeps quick add inline and moves editing into a modal", %{conn: conn} do
+    transaction = transaction_fixture(%{date: ~D[2026-05-13], amount: "100.00"})
+
+    {:ok, view, _html} = live(conn, ~p"/lancamentos?m=2026-05")
+    assert has_element?(view, "#transaction-form")
+    refute has_element?(view, "#transaction-modal")
+
+    view |> element("a[aria-label='Editar']") |> render_click()
+    assert_patch(view, ~p"/lancamentos?edit=#{transaction.id}&m=2026-05")
+    assert has_element?(view, "#transaction-modal #transaction-form")
+
+    view |> element("#transaction-modal-close") |> render_click()
+    assert_patch(view, ~p"/lancamentos?m=2026-05")
+    refute has_element?(view, "#transaction-modal")
+    assert has_element?(view, "#transaction-form")
+  end
 end

@@ -356,38 +356,34 @@ defmodule CashCadenceWeb.ImportLive do
         </div>
       </.card>
 
-      <dialog
+      <.modal
         :if={@detail}
         id="batch-detail"
-        class="modal modal-open"
-        phx-window-keydown="close_detail"
-        phx-key="escape"
+        title={@detail.file_name}
+        subtitle="Texto extraído do arquivo, do jeito que o leitor de PDF enxergou. Se algo ficou de fora da caixa de entrada, é daqui que você lança à mão."
+        on_cancel={JS.push("close_detail")}
+        max_width="max-w-4xl"
       >
-        <div class="modal-box max-w-4xl">
-          <h3 class="font-mono text-sm font-bold">{@detail.file_name}</h3>
+        <.modal_body>
           <div
             :if={@detail.warnings != []}
-            class="alert alert-warning alert-soft mt-3 items-start text-sm"
+            class="alert alert-warning alert-soft mb-3 items-start text-sm"
           >
             <.icon name="hero-exclamation-triangle-micro" class="mt-0.5 size-4" />
             <ul class="list-disc space-y-1 pl-4">
               <li :for={warning <- @detail.warnings}>{warning}</li>
             </ul>
           </div>
-          <p class="mt-3 text-sm text-base-content/60">
-            Texto extraído do arquivo, do jeito que o leitor de PDF enxergou. Se algo ficou de fora da caixa de entrada, é daqui que você lança à mão.
-          </p>
           <pre
             :if={@detail.raw_text}
-            class="mt-2 max-h-[60vh] overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-relaxed"
+            class="overflow-x-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-relaxed"
           >{@detail.raw_text}</pre>
-          <div class="modal-action">
-            <.link navigate={~p"/lancamentos"} class="btn btn-ghost btn-sm">Lançar à mão</.link>
-            <button type="button" phx-click="close_detail" class="btn btn-sm">Fechar</button>
-          </div>
-        </div>
-        <button type="button" class="modal-backdrop" phx-click="close_detail" aria-label="Fechar"></button>
-      </dialog>
+        </.modal_body>
+        <.modal_footer>
+          <.link navigate={~p"/lancamentos"} class="btn btn-ghost btn-sm">Lançar à mão</.link>
+          <button type="button" phx-click="close_detail" class="btn btn-sm">Fechar</button>
+        </.modal_footer>
+      </.modal>
     </Layouts.app>
     """
   end

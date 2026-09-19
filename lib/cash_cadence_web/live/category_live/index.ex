@@ -174,59 +174,85 @@ defmodule CashCadenceWeb.CategoryLive.Index do
         <.link navigate={~p"/lancamentos?#{%{"category" => "none"}}"} class="btn btn-sm">Revisar</.link>
       </div>
 
-      <section :if={@form_open?} class="card border border-primary/40 bg-base-100">
+      <.modal
+        :if={@form_open?}
+        id="category-modal"
+        title={if @editing, do: "Editar categoria", else: "Nova categoria"}
+        subtitle="Tipo, cor e vínculo com despesas fixas"
+        on_cancel={JS.patch(categories_path(assigns))}
+        max_width="max-w-lg"
+      >
         <.form
           for={@form}
           id="category-form"
           phx-change="validate"
           phx-submit="save"
-          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_10rem_8rem_auto_auto] md:items-start"
+          class="flex min-h-0 flex-1 flex-col"
         >
-          <.input field={@form[:name]} type="text" label="Nome" placeholder="Ex.: Mercado" required />
-          <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
-          <.input
-            field={@form[:color]}
-            type="color"
-            label="Cor"
-            value={@form[:color].value || "#67b5e1"}
-            class="input h-10 w-full p-1"
-          />
-          <.unlabeled_field>
-            <.input field={@form[:fixed]} type="checkbox" label="Despesa fixa" />
-          </.unlabeled_field>
-          <.unlabeled_field>
-            <div class="flex gap-1">
-              <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
-                do: "Salvar",
-                else: "Adicionar"}</.button>
-              <button type="button" phx-click="cancel" class="btn">Cancelar</button>
+          <.modal_body>
+            <div class="grid gap-x-4 sm:grid-cols-2">
+              <div class="sm:col-span-2">
+                <.input
+                  field={@form[:name]}
+                  type="text"
+                  label="Nome"
+                  placeholder="Ex.: Mercado"
+                  required
+                  data-autofocus
+                />
+              </div>
+              <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
+              <.input
+                field={@form[:color]}
+                type="color"
+                label="Cor"
+                value={@form[:color].value || "#67b5e1"}
+                class="input h-10 w-full p-1"
+              />
+              <div class="sm:col-span-2">
+                <.input field={@form[:fixed]} type="checkbox" label="Despesa fixa" />
+              </div>
             </div>
-          </.unlabeled_field>
+          </.modal_body>
+          <.modal_footer>
+            <button type="button" phx-click="cancel" class="btn btn-ghost">Cancelar</button>
+            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
+              do: "Salvar",
+              else: "Adicionar"}</.button>
+          </.modal_footer>
         </.form>
-      </section>
+      </.modal>
 
-      <section :if={@merging} class="card border border-warning/60 bg-base-100">
-        <form id="merge-form" phx-submit="merge" class="card-body flex flex-wrap items-end gap-3 p-5">
-          <div class="text-sm">
-            <p class="font-semibold">Mesclar “{@merging.name}” em outra categoria</p>
-            <p class="text-base-content/60">
-              Todos os lançamentos e despesas fixas passam para a categoria escolhida; “{@merging.name}” é arquivada.
-            </p>
-          </div>
-          <select name="target_id" class="select w-64" required>
-            <option value="">Escolha a categoria de destino</option>
-            <option :for={target <- @targets} :if={target.id != @merging.id} value={target.id}>
-              {target.name} · {kind_label(target.kind)}
-            </option>
-          </select>
-          <button
-            type="submit"
-            class="btn btn-warning"
-            data-confirm={"Mesclar “#{@merging.name}”? Isso não pode ser desfeito automaticamente."}
-          >Mesclar</button>
-          <.link patch={categories_path(assigns)} class="btn btn-ghost">Cancelar</.link>
+      <.modal
+        :if={@merging && !@form_open?}
+        id="merge-modal"
+        title={"Mesclar “#{@merging.name}” em outra categoria"}
+        subtitle={"Todos os lançamentos e despesas fixas passam para a categoria escolhida; “#{@merging.name}” é arquivada."}
+        on_cancel={JS.patch(categories_path(assigns))}
+        max_width="max-w-lg"
+      >
+        <form id="merge-form" phx-submit="merge" class="flex min-h-0 flex-1 flex-col">
+          <.modal_body>
+            <label class="fieldset" for="merge-target">
+              <span class="label mb-1">Categoria de destino</span>
+              <select id="merge-target" name="target_id" class="select w-full" required data-autofocus>
+                <option value="">Escolha a categoria de destino</option>
+                <option :for={target <- @targets} :if={target.id != @merging.id} value={target.id}>
+                  {target.name} · {kind_label(target.kind)}
+                </option>
+              </select>
+            </label>
+          </.modal_body>
+          <.modal_footer>
+            <.link patch={categories_path(assigns)} class="btn btn-ghost">Cancelar</.link>
+            <button
+              type="submit"
+              class="btn btn-warning"
+              data-confirm={"Mesclar “#{@merging.name}”? Isso não pode ser desfeito automaticamente."}
+            >Mesclar</button>
+          </.modal_footer>
         </form>
-      </section>
+      </.modal>
 
       <div class="join max-w-full overflow-x-auto">
         <.link

@@ -7,6 +7,7 @@ defmodule CashCadenceWeb.UIComponents do
   import CashCadenceWeb.Format
 
   alias CashCadence.Money
+  alias Phoenix.LiveView.JS
 
   attr :label, :string, required: true
   attr :class, :string, default: nil
@@ -262,14 +263,147 @@ defmodule CashCadenceWeb.UIComponents do
   defp good?(up?, :up), do: up?
   defp good?(up?, :down), do: not up?
 
-  attr :class, :string, default: nil
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :subtitle, :string, default: nil
+  attr :on_cancel, JS, default: %JS{}
+  attr :max_width, :string, default: "max-w-2xl"
   slot :inner_block, required: true
 
-  def unlabeled_field(assigns) do
+  def modal(assigns) do
     ~H"""
-    <div class={@class}>
-      <div class="label mb-1" aria-hidden="true">&nbsp;</div>
+    <div
+      id={@id}
+      class="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={"#{@id}-title"}
+      phx-hook=".Modal"
+      phx-window-keydown={@on_cancel}
+      phx-key="escape"
+    >
+      <div class={[
+        "modal-box flex max-h-[85dvh] w-full flex-col border border-base-300 p-0 shadow-2xl",
+        @max_width
+      ]}>
+        <header class="flex items-start justify-between gap-4 border-b border-base-300 px-5 py-4">
+          <div class="min-w-0">
+            <h3 id={"#{@id}-title"} class="text-sm font-bold">{@title}</h3>
+            <p :if={@subtitle} class="mt-1 text-xs text-base-content/60">{@subtitle}</p>
+          </div>
+          <button
+            type="button"
+            id={"#{@id}-close"}
+            phx-click={@on_cancel}
+            class="btn btn-ghost btn-sm btn-square -mr-2 -mt-1 shrink-0"
+            aria-label="Fechar"
+          >
+            <.icon name="hero-x-mark-micro" class="size-4" />
+          </button>
+        </header>
+        {render_slot(@inner_block)}
+      </div>
+      <button type="button" class="modal-backdrop" phx-click={@on_cancel} aria-label="Fechar"></button>
+    </div>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".Modal">
+      const FOCUSABLE =
+        "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), " +
+        "select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+
+      const SELECTABLE = ["text", "search", "url", "tel", "password"]
+
+      export default {
+        mounted() {
+          this.restoreTo = document.activeElement
+          this.onKeydown = (event) => this.trapTab(event)
+          this.el.addEventListener("keydown", this.onKeydown)
+          this.lock()
+          this.focusFirst()
+        },
+
+        updated() {
+          this.lock()
+        },
+
+        destroyed() {
+          this.el.removeEventListener("keydown", this.onKeydown)
+          this.unlock()
+          if (this.restoreTo && document.contains(this.restoreTo)) {
+            this.restoreTo.focus()
+          }
+        },
+
+        lock() {
+          document.documentElement.style.overflow = "hidden"
+        },
+
+        unlock() {
+          document.documentElement.style.overflow = ""
+        },
+
+        focusFirst() {
+          const box = this.el.querySelector(".modal-box")
+          const target =
+            box.querySelector("[data-autofocus]") ||
+            box.querySelector("input:not([type=hidden]), select, textarea")
+          if (!target) { return }
+          target.focus()
+          if (SELECTABLE.includes(target.type)) { target.select() }
+        },
+
+        trapTab(event) {
+          if (event.key !== "Tab") { return }
+          const items = Array.from(this.el.querySelectorAll(FOCUSABLE))
+            .filter((el) => el.offsetParent !== null)
+          if (items.length === 0) { return }
+          const first = items[0]
+          const last = items[items.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
+          }
+        }
+      }
+    </script>
+    """
+  end
+
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def modal_body(assigns) do
+    ~H"""
+    <div class={["min-h-0 flex-1 overflow-y-auto px-5 py-4", @class]}>
       {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
+  slot :inner_block, required: true
+
+  def modal_footer(assigns) do
+    ~H"""
+    <footer class="flex flex-wrap items-center justify-end gap-2 border-t border-base-300 bg-base-200/40 px-5 py-3">
+      {render_slot(@inner_block)}
+    </footer>
+    """
+  end
+
+  attr :title, :string, required: true
+  attr :hint, :string, default: nil
+  attr :class, :any, default: nil
+  slot :inner_block, required: true
+
+  def form_section(assigns) do
+    ~H"""
+    <div class={["mt-2 border-t border-base-300 pt-4", @class]}>
+      <h4 class="text-xs font-bold uppercase tracking-wide text-base-content/60">{@title}</h4>
+      <p :if={@hint} class="mt-1 text-xs text-base-content/60">{@hint}</p>
+      <div class="mt-3">{render_slot(@inner_block)}</div>
     </div>
     """
   end

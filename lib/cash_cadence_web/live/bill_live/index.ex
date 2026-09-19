@@ -239,80 +239,103 @@ defmodule CashCadenceWeb.BillLive.Index do
         </.kpi>
       </div>
 
-      <section :if={@form_open?} class="card border border-primary/40 bg-base-100">
+      <.modal
+        :if={@form_open?}
+        id="bill-modal"
+        title={if @editing, do: "Editar despesa fixa", else: "Nova despesa fixa"}
+        subtitle="O que se repete todo mês, com o valor que você espera pagar ou receber"
+        on_cancel={JS.patch(bills_path(assigns))}
+        max_width="max-w-2xl"
+      >
         <.form
           for={@form}
           id="bill-form"
           phx-change="validate"
           phx-submit="save"
-          class="card-body grid gap-3 p-5 md:grid-cols-[1fr_9rem_1fr_9rem_7rem_auto] md:items-start"
+          class="flex min-h-0 flex-1 flex-col"
         >
-          <.input field={@form[:name]} type="text" label="Nome" placeholder="Ex.: Internet" required />
-          <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
-          <div>
-            <.input
-              field={@form[:category_name]}
-              type="text"
-              label="Categoria vinculada"
-              list="bill-category-options"
-              autocomplete="off"
-              placeholder="Categoria"
-            />
-            <datalist id="bill-category-options">
-              <option :for={suggestion <- @suggestions} value={suggestion.name}>
-                {suggestion.uses} usos
-              </option>
-            </datalist>
-          </div>
-          <.input
-            field={@form[:expected_amount]}
-            type="text"
-            label="Valor esperado"
-            inputmode="decimal"
-            placeholder="0,00"
-            value={input_amount(@form[:expected_amount].value)}
-            required
-            class="input tabular text-right"
-          />
-          <.input
-            field={@form[:due_day]}
-            type="number"
-            label="Dia"
-            min="1"
-            max="31"
-            placeholder="—"
-          />
-          <.unlabeled_field>
-            <div class="flex gap-1">
-              <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
-                do: "Salvar",
-                else: "Adicionar"}</.button>
-              <button type="button" phx-click="cancel" class="btn">Cancelar</button>
+          <.modal_body>
+            <div class="grid gap-x-4 sm:grid-cols-2">
+              <div class="sm:col-span-2">
+                <.input
+                  field={@form[:name]}
+                  type="text"
+                  label="Nome"
+                  placeholder="Ex.: Internet"
+                  required
+                  data-autofocus
+                />
+              </div>
+              <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
+              <div>
+                <.input
+                  field={@form[:category_name]}
+                  type="text"
+                  label="Categoria vinculada"
+                  list="bill-category-options"
+                  autocomplete="off"
+                  placeholder="Categoria"
+                />
+                <datalist id="bill-category-options">
+                  <option :for={suggestion <- @suggestions} value={suggestion.name}>
+                    {suggestion.uses} usos
+                  </option>
+                </datalist>
+              </div>
+              <.input
+                field={@form[:expected_amount]}
+                type="text"
+                label="Valor esperado"
+                inputmode="decimal"
+                placeholder="0,00"
+                value={input_amount(@form[:expected_amount].value)}
+                required
+                class="input tabular w-full text-right"
+              />
+              <.input
+                field={@form[:due_day]}
+                type="number"
+                label="Dia do vencimento"
+                min="1"
+                max="31"
+                placeholder="—"
+              />
             </div>
-          </.unlabeled_field>
-          <div class="grid gap-3 rounded-box border border-base-300 p-3 md:col-span-6 md:grid-cols-[10rem_10rem_7rem_1fr]">
-            <p class="text-xs text-base-content/60 md:col-span-4">
-              Opcional: vigência e parcelas. Sem vigência, vale todo mês. Com texto no extrato, o pagamento é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria.
-            </p>
-            <.input field={@form[:starts_month]} type="month" label="Começa em" />
-            <.input field={@form[:ends_month]} type="month" label="Termina em" />
-            <.input
-              field={@form[:installments_total]}
-              type="number"
-              label="Parcelas"
-              min="2"
-              placeholder="—"
-            />
-            <.input
-              field={@form[:match_text]}
-              type="text"
-              label="Texto no extrato"
-              placeholder="Ex.: RECEITA FEDERAL"
-              class="input w-full font-mono uppercase"
-            />
-          </div>
+
+            <.form_section
+              title="Vigência e parcelas"
+              hint="Opcional. Sem vigência, a despesa vale todo mês. Com texto no extrato, o pagamento é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria."
+            >
+              <div class="grid gap-x-4 sm:grid-cols-3">
+                <.input field={@form[:starts_month]} type="month" label="Começa em" />
+                <.input field={@form[:ends_month]} type="month" label="Termina em" />
+                <.input
+                  field={@form[:installments_total]}
+                  type="number"
+                  label="Parcelas"
+                  min="2"
+                  placeholder="—"
+                />
+                <div class="sm:col-span-3">
+                  <.input
+                    field={@form[:match_text]}
+                    type="text"
+                    label="Texto no extrato"
+                    placeholder="Ex.: RECEITA FEDERAL"
+                    class="input w-full font-mono uppercase"
+                  />
+                </div>
+              </div>
+            </.form_section>
+          </.modal_body>
+          <.modal_footer>
+            <button type="button" phx-click="cancel" class="btn btn-ghost">Cancelar</button>
+            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
+              do: "Salvar",
+              else: "Adicionar"}</.button>
+          </.modal_footer>
         </.form>
-      </section>
+      </.modal>
 
       <section class="card border border-base-300 bg-base-100">
         <.empty_state :if={@panel.items == []} icon="hero-arrow-path">

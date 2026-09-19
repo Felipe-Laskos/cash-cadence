@@ -327,14 +327,12 @@ defmodule CashCadenceWeb.TransactionLive.Index do
 
       <section class="card border border-base-300 bg-base-100">
         <.form
+          :if={!@editing}
           for={@form}
           id="transaction-form"
           phx-change="validate"
           phx-submit={JS.push("save") |> JS.focus(to: "#transaction_category_name")}
-          class={[
-            "grid gap-2 border-b border-base-300 p-4 md:grid-cols-2 md:items-start lg:grid-cols-[9rem_10rem_1fr_1fr] xl:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto]",
-            @editing && "bg-secondary/30"
-          ]}
+          class="grid gap-2 border-b border-base-300 p-4 md:grid-cols-2 md:items-start lg:grid-cols-[9rem_10rem_1fr_1fr] xl:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto]"
         >
           <.input field={@form[:date]} type="date" required />
           <.input field={@form[:kind]} type="select" options={@kinds} />
@@ -345,7 +343,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
               list="category-options"
               autocomplete="off"
               placeholder="Categoria"
-              phx-mounted={(@focus_new || @editing) && JS.focus()}
+              phx-mounted={@focus_new && JS.focus()}
             />
             <datalist id="category-options">
               <option :for={suggestion <- @suggestions} value={suggestion.name}>
@@ -370,40 +368,113 @@ defmodule CashCadenceWeb.TransactionLive.Index do
             aria-label="Competência"
           />
           <div class="flex gap-1">
-            <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
-              do: "Salvar",
-              else: "Adicionar"}</.button>
-            <button :if={@editing} type="button" phx-click="cancel" class="btn">Cancelar</button>
+            <.button variant="primary" phx-disable-with="Salvando…">Adicionar</.button>
           </div>
         </.form>
-        <p class="px-4 py-2 text-xs text-base-content/50">
+        <p :if={!@editing} class="px-4 py-2 text-xs text-base-content/50">
           Enter salva e mantém a data para o próximo · a categoria aceita as primeiras letras · valores com vírgula ou ponto · o mês ao lado do valor só se a competência for outra
         </p>
 
-        <section :if={@reimbursing} class="border-b border-warning/60 bg-warning/5">
+        <.modal
+          :if={@editing}
+          id="transaction-modal"
+          title="Editar lançamento"
+          subtitle="A competência só muda se for diferente do mês da data"
+          on_cancel={JS.patch(list_path(assigns))}
+          max_width="max-w-2xl"
+        >
+          <.form
+            for={@form}
+            id="transaction-form"
+            phx-change="validate"
+            phx-submit="save"
+            class="flex min-h-0 flex-1 flex-col"
+          >
+            <.modal_body>
+              <div class="grid gap-x-4 sm:grid-cols-2">
+                <.input field={@form[:date]} type="date" label="Data" required />
+                <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
+                <div>
+                  <.input
+                    field={@form[:category_name]}
+                    type="text"
+                    label="Categoria"
+                    list="category-options"
+                    autocomplete="off"
+                    placeholder="Categoria"
+                    data-autofocus
+                  />
+                  <datalist id="category-options">
+                    <option :for={suggestion <- @suggestions} value={suggestion.name}>
+                      {suggestion.uses} usos{if suggestion.fixed, do: " · fixa"}
+                    </option>
+                  </datalist>
+                </div>
+                <.input
+                  field={@form[:description]}
+                  type="text"
+                  label="Descrição"
+                  placeholder="Opcional"
+                />
+                <.input
+                  field={@form[:amount]}
+                  type="text"
+                  label="Valor"
+                  inputmode="decimal"
+                  placeholder="0,00"
+                  value={input_amount(@form[:amount].value)}
+                  required
+                  class="input tabular w-full text-right"
+                />
+                <.input field={@form[:competence_month]} type="month" label="Competência" />
+              </div>
+            </.modal_body>
+            <.modal_footer>
+              <button type="button" phx-click="cancel" class="btn btn-ghost">Cancelar</button>
+              <.button variant="primary" phx-disable-with="Salvando…">Salvar</.button>
+            </.modal_footer>
+          </.form>
+        </.modal>
+
+        <.modal
+          :if={@reimbursing}
+          id="reimbursement-modal"
+          title={"Ligar a receita de #{amount(@reimbursing.amount)} em #{short_date(@reimbursing.date)} como reembolso de…"}
+          subtitle="A despesa original passa a contar líquida e essa receita sai da soma de receitas. A lista traz as despesas dos últimos 60 dias, a mais próxima em valor primeiro."
+          on_cancel={JS.patch(list_path(assigns))}
+          max_width="max-w-xl"
+        >
           <form
             id="reimbursement-form"
             phx-submit="link_reimbursement"
-            class="flex flex-wrap items-end gap-3 p-4"
+            class="flex min-h-0 flex-1 flex-col"
           >
-            <div class="text-sm">
-              <p class="font-semibold">
-                Ligar a receita de {amount(@reimbursing.amount)} em {short_date(@reimbursing.date)} como reembolso de…
-              </p>
-              <p class="text-base-content/60">
-                A despesa original passa a contar líquida e essa receita sai da soma de receitas. A lista traz as despesas dos últimos 60 dias, a mais próxima em valor primeiro.
-              </p>
-            </div>
-            <select name="expense_id" class="select w-full max-w-md" required>
-              <option value="">Escolha a despesa…</option>
-              <option :for={candidate <- @candidates} value={candidate.id}>
-                {reimbursement_label(candidate)}
-              </option>
-            </select>
-            <button type="submit" class="btn btn-warning btn-sm">Ligar como reembolso</button>
-            <.link patch={list_path(assigns)} class="btn btn-ghost btn-sm">Cancelar</.link>
+            <.modal_body>
+              <label class="fieldset" for="reimbursement-expense">
+                <span class="label mb-1">Despesa original</span>
+                <select
+                  id="reimbursement-expense"
+                  name="expense_id"
+                  class="select w-full"
+                  required
+                  data-autofocus
+                >
+                  <option value="">Escolha a despesa…</option>
+                  <option :for={candidate <- @candidates} value={candidate.id}>
+                    {reimbursement_label(candidate)}
+                  </option>
+                </select>
+              </label>
+              <.empty_state :if={@candidates == []} icon="hero-arrow-uturn-left">
+                Nenhuma despesa candidata nos últimos 60 dias.
+              </.empty_state>
+            </.modal_body>
+            <.modal_footer>
+              <.link patch={list_path(assigns)} class="btn btn-ghost">Cancelar</.link>
+              <button type="submit" class="btn btn-warning">Ligar como reembolso</button>
+            </.modal_footer>
           </form>
-        </section>
+        </.modal>
 
         <div id="days" phx-update="stream" class="divide-y divide-base-300">
           <div id="days-empty" class="hidden only:block">

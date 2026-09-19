@@ -146,4 +146,20 @@ defmodule CashCadenceWeb.SettingsLiveTest do
     assert [_file] = CashCadence.Backup.list_files(dir)
     assert has_element?(view, "#auto-backup li", "cashcadence-")
   end
+
+  test "opens the account and rule forms in modals", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/configuracoes")
+    refute has_element?(view, "#account-modal")
+    refute has_element?(view, "#rule-modal")
+
+    {:ok, view, _html} = live(conn, ~p"/configuracoes?account=new")
+    assert has_element?(view, "#account-modal #account-form")
+
+    view |> element("#account-modal-close") |> render_click()
+    assert_patch(view, ~p"/configuracoes")
+    refute has_element?(view, "#account-modal")
+
+    {:ok, view, _html} = live(conn, ~p"/configuracoes?rule=new")
+    assert has_element?(view, "#rule-modal #rule-form")
+  end
 end

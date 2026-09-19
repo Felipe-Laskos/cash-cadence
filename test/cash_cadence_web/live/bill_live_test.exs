@@ -117,4 +117,17 @@ defmodule CashCadenceWeb.BillLiveTest do
     {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-07")
     refute has_element?(view, "#bill-#{bill.id}")
   end
+
+  test "opens the bill form in a modal and closes it", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-05")
+    refute has_element?(view, "#bill-modal")
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-05&new=1")
+    assert has_element?(view, "#bill-modal #bill-form")
+    assert has_element?(view, "#bill-modal", "Nova despesa fixa")
+
+    view |> element("#bill-modal-close") |> render_click()
+    assert_patch(view, ~p"/fixas?m=2026-05")
+    refute has_element?(view, "#bill-modal")
+  end
 end

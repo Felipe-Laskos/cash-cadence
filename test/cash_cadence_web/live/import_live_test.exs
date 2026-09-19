@@ -70,7 +70,7 @@ defmodule CashCadenceWeb.ImportLiveTest do
     assert html =~ "Saldo de 20/05/2026 não bate"
     assert has_element?(view, "#batch-detail pre", "SALDO DO DIA")
 
-    view |> element("#batch-detail .modal-action button", "Fechar") |> render_click()
+    view |> element("#batch-detail footer button", "Fechar") |> render_click()
     refute has_element?(view, "#batch-detail")
   end
 
