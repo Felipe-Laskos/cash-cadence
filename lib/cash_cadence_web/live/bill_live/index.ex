@@ -27,7 +27,7 @@ defmodule CashCadenceWeb.BillLive.Index do
     socket =
       socket
       |> assign(month: month, editing: editing, form_open?: form_open?)
-      |> assign_form(bill_changeset(editing))
+      |> assign_form(bill_changeset(editing, params["kind"]))
       |> reload()
 
     {:noreply, socket}
@@ -47,9 +47,10 @@ defmodule CashCadenceWeb.BillLive.Index do
     )
   end
 
-  defp bill_changeset(nil), do: Budgets.change_recurring_bill(%RecurringBill{}, %{kind: :expense})
+  defp bill_changeset(nil, kind),
+    do: Budgets.change_recurring_bill(%RecurringBill{}, %{kind: new_kind(kind)})
 
-  defp bill_changeset(%RecurringBill{} = bill) do
+  defp bill_changeset(%RecurringBill{} = bill, _kind) do
     Budgets.change_recurring_bill(%{
       bill
       | category_name: bill.category && bill.category.name,
@@ -58,7 +59,34 @@ defmodule CashCadenceWeb.BillLive.Index do
     })
   end
 
-  defp assign_form(socket, changeset), do: assign(socket, form: to_form(changeset))
+  defp new_kind("income"), do: :income
+  defp new_kind(_kind), do: :expense
+
+  defp assign_form(socket, changeset) do
+    assign(socket,
+      form: to_form(changeset),
+      form_kind: Ecto.Changeset.get_field(changeset, :kind) || :expense
+    )
+  end
+
+  defp kind_noun(:income), do: "receita fixa"
+  defp kind_noun(_kind), do: "despesa fixa"
+
+  defp form_title(nil, kind), do: "Nova #{kind_noun(kind)}"
+  defp form_title(_editing, kind), do: "Editar #{kind_noun(kind)}"
+
+  defp form_subtitle(:income), do: "O que entra todo mês, com o valor que você espera receber"
+  defp form_subtitle(_kind), do: "O que sai todo mês, com o valor que você espera pagar"
+
+  defp due_day_label(:income), do: "Dia do recebimento"
+  defp due_day_label(_kind), do: "Dia do vencimento"
+
+  defp validity_hint(kind) do
+    {noun, event} =
+      if kind == :income, do: {"receita", "recebimento"}, else: {"despesa", "pagamento"}
+
+    "Opcional. Sem vigência, a #{noun} vale todo mês. Com texto no extrato, o #{event} é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria."
+  end
 
   defp bills_path(assigns, overrides \\ %{}) do
     params =
@@ -104,10 +132,10 @@ defmodule CashCadenceWeb.BillLive.Index do
       end
 
     case result do
-      {:ok, _bill} ->
+      {:ok, bill} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Despesa fixa salva.")
+         |> put_flash(:info, "#{String.capitalize(kind_noun(bill.kind))} salva.")
          |> push_patch(to: bills_path(socket.assigns))}
 
       {:error, changeset} ->
@@ -119,8 +147,13 @@ defmodule CashCadenceWeb.BillLive.Index do
     do: {:noreply, push_patch(socket, to: bills_path(socket.assigns))}
 
   def handle_event("delete", %{"id" => id}, socket) do
-    {:ok, _} = id |> Budgets.get_recurring_bill!() |> Budgets.delete_recurring_bill()
-    {:noreply, socket |> put_flash(:info, "Despesa fixa excluída.") |> reload()}
+    bill = Budgets.get_recurring_bill!(id)
+    {:ok, _} = Budgets.delete_recurring_bill(bill)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "#{String.capitalize(kind_noun(bill.kind))} excluída.")
+     |> reload()}
   end
 
   def handle_event("adjust", %{"id" => id, "amount" => amount}, socket) do
@@ -171,12 +204,25 @@ defmodule CashCadenceWeb.BillLive.Index do
         <div>
           <h1 class="text-3xl font-bold tracking-tight">Despesas fixas</h1>
           <p class="text-sm text-base-content/60">
-            O que se repete todo mês: valor esperado × o que já foi pago em {month_label(@month)}
+            Despesas e receitas que se repetem todo mês: valor esperado × o que já foi pago ou recebido em {month_label(
+              @month
+            )}
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <.month_nav month={@month} base={~p"/fixas"} />
-          <.link patch={bills_path(assigns, %{"new" => "1"})} class="btn btn-primary btn-sm">
+          <.link
+            id="new-income-bill"
+            patch={bills_path(assigns, %{"new" => "1", "kind" => "income"})}
+            class="btn btn-sm"
+          >
+            <.icon name="hero-plus-micro" class="size-4" /> Nova receita fixa
+          </.link>
+          <.link
+            id="new-bill"
+            patch={bills_path(assigns, %{"new" => "1"})}
+            class="btn btn-primary btn-sm"
+          >
             <.icon name="hero-plus-micro" class="size-4" /> Nova despesa fixa
           </.link>
         </div>
@@ -242,8 +288,8 @@ defmodule CashCadenceWeb.BillLive.Index do
       <.modal
         :if={@form_open?}
         id="bill-modal"
-        title={if @editing, do: "Editar despesa fixa", else: "Nova despesa fixa"}
-        subtitle="O que se repete todo mês, com o valor que você espera pagar ou receber"
+        title={form_title(@editing, @form_kind)}
+        subtitle={form_subtitle(@form_kind)}
         on_cancel={JS.patch(bills_path(assigns))}
         max_width="max-w-2xl"
       >
@@ -296,17 +342,14 @@ defmodule CashCadenceWeb.BillLive.Index do
               <.input
                 field={@form[:due_day]}
                 type="number"
-                label="Dia do vencimento"
+                label={due_day_label(@form_kind)}
                 min="1"
                 max="31"
                 placeholder="—"
               />
             </div>
 
-            <.form_section
-              title="Vigência e parcelas"
-              hint="Opcional. Sem vigência, a despesa vale todo mês. Com texto no extrato, o pagamento é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria."
-            >
+            <.form_section title="Vigência e parcelas" hint={validity_hint(@form_kind)}>
               <div class="grid gap-x-4 sm:grid-cols-3">
                 <.input field={@form[:starts_month]} type="month" label="Começa em" />
                 <.input field={@form[:ends_month]} type="month" label="Termina em" />
@@ -425,12 +468,21 @@ defmodule CashCadenceWeb.BillLive.Index do
 
       <div class="grid gap-4 xl:grid-cols-5">
         <.card
-          title="Receitas esperadas"
-          subtitle="Entram na conta de cobertura"
+          title="Receitas fixas esperadas"
+          subtitle="O que entra todo mês: salário, lucros, qualquer receita certa"
           class="xl:col-span-2"
         >
+          <:actions>
+            <.link
+              id="new-income-bill-card"
+              patch={bills_path(assigns, %{"new" => "1", "kind" => "income"})}
+              class="btn btn-sm"
+            >
+              <.icon name="hero-plus-micro" class="size-4" /> Nova receita fixa
+            </.link>
+          </:actions>
           <.empty_state :if={@incomes == []} icon="hero-banknotes">
-            Nenhuma receita esperada. Cadastre o salário como recorrência do tipo Receita.
+            Nenhuma receita fixa cadastrada. O salário e as outras entradas certas do mês ficam aqui.
           </.empty_state>
           <div :if={@incomes != []} class="overflow-x-auto">
             <table class="table table-sm">
@@ -438,7 +490,7 @@ defmodule CashCadenceWeb.BillLive.Index do
                 <tr>
                   <th>Receita</th><th class="text-right">Esperado</th><th>
                     {String.capitalize(month_name(@month))}
-                  </th>
+                  </th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -450,6 +502,27 @@ defmodule CashCadenceWeb.BillLive.Index do
                       Recebido{if income.received_on, do: " em #{short_date(income.received_on)}"}
                     </.badge>
                     <.badge :if={income.status == :pending} kind={:neutral}>Sem recebimento</.badge>
+                  </td>
+                  <td>
+                    <div class="flex items-center justify-end gap-1">
+                      <.link
+                        patch={bills_path(assigns, %{"edit" => income.bill.id})}
+                        class="btn btn-ghost btn-xs btn-square"
+                        aria-label="Editar"
+                      >
+                        <.icon name="hero-pencil-square-micro" class="size-4" />
+                      </.link>
+                      <button
+                        type="button"
+                        phx-click="delete"
+                        phx-value-id={income.bill.id}
+                        data-confirm="Excluir esta receita fixa? Os lançamentos continuam no livro."
+                        class="btn btn-ghost btn-xs btn-square"
+                        aria-label="Excluir"
+                      >
+                        <.icon name="hero-trash-micro" class="size-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>

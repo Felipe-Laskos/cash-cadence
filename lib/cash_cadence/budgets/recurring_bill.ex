@@ -57,7 +57,7 @@ defmodule CashCadence.Budgets.RecurringBill do
     |> validate_number(:installments_total, greater_than_or_equal_to: 2)
     |> validate_range()
     |> foreign_key_constraint(:category_id)
-    |> unique_constraint(:name, message: "já existe uma despesa fixa com esse nome")
+    |> unique_constraint(:name, message: "já existe uma despesa ou receita fixa com esse nome")
   end
 
   defp trim(nil), do: nil
