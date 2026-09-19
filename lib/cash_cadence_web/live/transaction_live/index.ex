@@ -341,6 +341,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
               field={@form[:category_name]}
               type="text"
               list="category-options"
+              phx-hook="Typeahead"
               autocomplete="off"
               placeholder="Categoria"
               phx-mounted={@focus_new && JS.focus()}
@@ -372,7 +373,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           </div>
         </.form>
         <p :if={!@editing} class="px-4 py-2 text-xs text-base-content/50">
-          Enter salva e mantém a data para o próximo · a categoria aceita as primeiras letras · valores com vírgula ou ponto · o mês ao lado do valor só se a competência for outra
+          Enter salva e mantém a data para o próximo · na categoria, o primeiro Enter completa com a sugestão e o seguinte salva · valores com vírgula ou ponto · o mês ao lado do valor só se a competência for outra
         </p>
 
         <.modal
@@ -400,6 +401,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
                     type="text"
                     label="Categoria"
                     list="category-options"
+                    phx-hook="Typeahead"
                     autocomplete="off"
                     placeholder="Categoria"
                     data-autofocus

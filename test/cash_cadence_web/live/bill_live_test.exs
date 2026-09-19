@@ -130,4 +130,17 @@ defmodule CashCadenceWeb.BillLiveTest do
     assert_patch(view, ~p"/fixas?m=2026-05")
     refute has_element?(view, "#bill-modal")
   end
+
+  test "wires the category field to the suggestion typeahead", %{conn: conn} do
+    category_fixture(%{name: "Combustível"})
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-05&new=1")
+
+    assert has_element?(
+             view,
+             "#bill-form input[list='bill-category-options'][phx-hook='Typeahead']"
+           )
+
+    assert has_element?(view, "#bill-category-options option[value='Combustível']")
+  end
 end

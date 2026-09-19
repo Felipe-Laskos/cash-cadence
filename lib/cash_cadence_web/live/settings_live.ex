@@ -513,6 +513,7 @@ defmodule CashCadenceWeb.SettingsLive do
                     label="Categoria"
                     placeholder="Ex.: Combustível"
                     list="settings-category-options"
+                    phx-hook="Typeahead"
                     autocomplete="off"
                   />
                   <.input

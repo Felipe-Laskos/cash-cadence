@@ -273,6 +273,7 @@ defmodule CashCadenceWeb.BillLive.Index do
                   type="text"
                   label="Categoria vinculada"
                   list="bill-category-options"
+                  phx-hook="Typeahead"
                   autocomplete="off"
                   placeholder="Categoria"
                 />
