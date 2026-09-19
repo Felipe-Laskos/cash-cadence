@@ -20,7 +20,7 @@ defmodule CashCadenceWeb.SettingsLive do
   ]
   @targets [
     {"a descrição do banco", "description"},
-    {"a categoria informada pelo Itaú", "bank_hint"}
+    {"a categoria informada pelo banco", "bank_hint"}
   ]
   @kind_overrides [
     {"manter o do extrato", ""},

@@ -57,7 +57,7 @@ defmodule CashCadence.ImportsPDFTest do
       workshop = Enum.find(Imports.list_inbox(), &(&1.description == "OficinaExemplo (3/3)"))
       assert workshop.date == ~D[2026-03-16]
       assert workshop.competence == ~D[2026-05-01]
-      assert workshop.payload["itau_category"] == "serviços"
+      assert workshop.payload["bank_category"] == "serviços"
 
       assert {:ok, transaction} = Imports.approve(workshop, %{"category_name" => "Carro"})
       assert transaction.competence == ~D[2026-05-01]

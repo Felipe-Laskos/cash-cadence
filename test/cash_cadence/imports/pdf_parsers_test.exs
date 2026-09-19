@@ -116,7 +116,7 @@ defmodule CashCadence.Imports.PDFParsersTest do
       assert workshop.competence == ~D[2026-05-01]
       assert workshop.description == "OficinaExemplo (3/3)"
       assert workshop.payload["installment"] == %{"number" => 3, "of" => 3}
-      assert workshop.payload["itau_category"] == "serviços"
+      assert workshop.payload["bank_category"] == "serviços"
       assert workshop.payload["city"] == "CIDADE EXEMPLO"
 
       assert subscription.date == ~D[2026-05-07]

@@ -228,7 +228,7 @@ defmodule CashCadence.Imports do
     Classifier.classify(%{
       raw: raw.raw_description,
       normalized: normalized,
-      hint: raw.payload["itau_category"]
+      hint: raw.payload["bank_category"]
     })
   end
 
@@ -258,7 +258,7 @@ defmodule CashCadence.Imports do
       Classifier.classify(%{
         raw: item.raw_description,
         normalized: item.normalized_description,
-        hint: item.payload["itau_category"]
+        hint: item.payload["bank_category"]
       })
 
     kind = reclassified_kind(item, classification)
