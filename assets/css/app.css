@@ -160,6 +160,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+select.select,
+.select > select {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
 .grid > .card {
   min-width: 0;
 }
