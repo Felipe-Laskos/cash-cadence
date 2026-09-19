@@ -162,4 +162,17 @@ defmodule CashCadenceWeb.SettingsLiveTest do
     {:ok, view, _html} = live(conn, ~p"/configuracoes?rule=new")
     assert has_element?(view, "#rule-modal #rule-form")
   end
+
+  test "wires the rule category field to the suggestion typeahead", %{conn: conn} do
+    category_fixture(%{name: "Combustível"})
+
+    {:ok, view, _html} = live(conn, ~p"/configuracoes?rule=new")
+
+    assert has_element?(
+             view,
+             "#rule-form input[list='settings-category-options'][phx-hook='Typeahead']"
+           )
+
+    assert has_element?(view, "#settings-category-options option[value='Combustível']")
+  end
 end

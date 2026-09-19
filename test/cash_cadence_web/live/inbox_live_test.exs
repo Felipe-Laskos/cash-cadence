@@ -155,4 +155,21 @@ defmodule CashCadenceWeb.InboxLiveTest do
     assert html =~ "Não foi possível aprovar"
     assert Imports.count_pending() == 3
   end
+
+  test "wires the item category field to the suggestion typeahead", %{conn: conn} do
+    category_fixture(%{name: "Comida"})
+    {:ok, _batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
+
+    bakery =
+      Enum.find(Imports.list_inbox(), &(&1.description == "Compra no débito: PADARIA EXEMPLO"))
+
+    {:ok, view, _html} = live(conn, ~p"/entrada")
+
+    assert has_element?(
+             view,
+             "#item-#{bakery.id}-category[list='inbox-category-options'][phx-hook='Typeahead']"
+           )
+
+    assert has_element?(view, "#inbox-category-options option[value='Comida']")
+  end
 end

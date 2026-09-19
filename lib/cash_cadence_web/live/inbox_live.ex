@@ -259,7 +259,9 @@ defmodule CashCadenceWeb.InboxLive do
                   type="text"
                   name="item[category_name]"
                   value={category_default(item)}
+                  id={"#{dom_id}-category"}
                   list="inbox-category-options"
+                  phx-hook="Typeahead"
                   autocomplete="off"
                   placeholder="Categoria"
                   class="input input-sm w-44"
