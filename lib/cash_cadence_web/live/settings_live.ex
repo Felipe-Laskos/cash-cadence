@@ -456,7 +456,7 @@ defmodule CashCadenceWeb.SettingsLive do
             id="rule-form"
             phx-change="validate_rule"
             phx-submit="save_rule"
-            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-[13rem_11rem_1fr_11rem_12rem] md:items-start"
+            class="mb-4 grid gap-3 rounded-box border border-primary/40 p-4 md:grid-cols-2 md:items-end lg:grid-cols-3 2xl:grid-cols-[16rem_11rem_minmax(12rem,1fr)_11rem_12rem]"
           >
             <.input field={@rule_form[:target]} type="select" label="Se" options={@targets} />
             <.input field={@rule_form[:match_kind]} type="select" label="…" options={@match_kinds} />
@@ -482,7 +482,7 @@ defmodule CashCadenceWeb.SettingsLive do
               label="Tipo"
               options={@kind_overrides}
             />
-            <div class="flex flex-wrap items-center gap-3 md:col-span-5">
+            <div class="flex flex-wrap items-center gap-3 md:col-span-2 lg:col-span-3 2xl:col-span-5">
               <.input field={@rule_form[:active]} type="checkbox" label="Ativa" />
               <div class="ml-auto flex gap-1">
                 <.button variant="primary" phx-disable-with="Salvando…">
