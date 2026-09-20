@@ -12,6 +12,7 @@ defmodule CashCadence.Backup do
     {"import_batches", CashCadence.Imports.Batch},
     {"transactions", CashCadence.Ledger.Transaction},
     {"recurring_bills", CashCadence.Budgets.RecurringBill},
+    {"recurring_bill_amounts", CashCadence.Budgets.BillAmount},
     {"rules", CashCadence.Classifier.Rule},
     {"category_memory", CashCadence.Classifier.Memory},
     {"inbox_items", CashCadence.Imports.InboxItem}

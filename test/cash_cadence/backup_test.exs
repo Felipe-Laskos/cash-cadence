@@ -22,6 +22,7 @@ defmodule CashCadence.BackupTest do
       })
 
     bill = recurring_bill_fixture(%{name: "Internet", expected_amount: "99.90", due_day: 10})
+    {:ok, bill} = Budgets.change_amount_from(bill, ~D[2026-05-01], "120.00")
     {:ok, rule} = Classifier.create_rule(%{"pattern" => "PADARIA", "category_id" => food.id})
     :ok = Classifier.learn("PIX QRS PADARIA", food.id)
     {:ok, batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
@@ -32,6 +33,7 @@ defmodule CashCadence.BackupTest do
     assert Map.keys(dump["tables"]) |> Enum.sort() == Enum.sort(Backup.tables())
     assert length(dump["tables"]["transactions"]) == 1
     assert length(dump["tables"]["inbox_items"]) == 3
+    assert length(dump["tables"]["recurring_bill_amounts"]) == 2
 
     decoded = dump |> Backup.encode() |> Jason.decode!()
 
@@ -52,6 +54,8 @@ defmodule CashCadence.BackupTest do
     assert restored.competence == ~D[2026-05-01]
 
     assert Budgets.get_recurring_bill!(bill.id).due_day == 10
+    assert Decimal.equal?(Budgets.expected_amount_at(bill, ~D[2026-04-01]), Decimal.new("99.90"))
+    assert Decimal.equal?(Budgets.expected_amount_at(bill, ~D[2026-05-01]), Decimal.new("120.00"))
     assert Classifier.get_rule!(rule.id).pattern == "PADARIA"
     assert Imports.get_batch!(batch.id).file_name == "nubank_conta.ofx"
     assert Imports.count_pending() == 3

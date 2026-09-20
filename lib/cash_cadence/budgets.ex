@@ -3,6 +3,7 @@ defmodule CashCadence.Budgets do
 
   import Ecto.Query, warn: false
 
+  alias CashCadence.Budgets.BillAmount
   alias CashCadence.Budgets.RecurringBill
   alias CashCadence.Ledger.Transaction
   alias CashCadence.Money
@@ -11,13 +12,16 @@ defmodule CashCadence.Budgets do
   @tolerance Decimal.new("0.10")
 
   def list_recurring_bills(opts \\ []) do
+    competence = opts[:competence] && Date.beginning_of_month(opts[:competence])
+
     RecurringBill
     |> maybe_active(Keyword.get(opts, :active, true))
     |> maybe_kind(opts[:kind])
-    |> maybe_competence(opts[:competence])
+    |> maybe_competence(competence)
     |> order_by([b], asc: fragment("lower(?)", b.name))
     |> preload(:category)
     |> Repo.all()
+    |> put_effective_amounts(competence)
   end
 
   defp maybe_active(query, true), do: where(query, [b], b.active)
@@ -28,9 +32,7 @@ defmodule CashCadence.Budgets do
 
   defp maybe_competence(query, nil), do: query
 
-  defp maybe_competence(query, %Date{} = competence) do
-    month = Date.beginning_of_month(competence)
-
+  defp maybe_competence(query, %Date{} = month) do
     where(
       query,
       [b],
@@ -47,8 +49,142 @@ defmodule CashCadence.Budgets do
     %RecurringBill{} |> RecurringBill.changeset(attrs) |> Repo.insert()
   end
 
-  def update_recurring_bill(%RecurringBill{} = bill, attrs) do
-    bill |> RecurringBill.changeset(attrs) |> Repo.update()
+  def update_recurring_bill(%RecurringBill{} = bill, attrs, opts \\ []) do
+    month = opts |> Keyword.get(:on, Date.utc_today()) |> Date.beginning_of_month()
+
+    Repo.transact(fn ->
+      with {:ok, updated} <- bill |> RecurringBill.changeset(attrs) |> Repo.update() do
+        correct_amount(updated, bill.expected_amount, month)
+      end
+    end)
+  end
+
+  def expected_amount_at(%RecurringBill{} = bill, %Date{} = competence) do
+    case list_bill_amounts(bill) do
+      [] -> bill.expected_amount
+      rows -> rows |> effective_bill_amount(competence) |> Map.fetch!(:expected_amount)
+    end
+  end
+
+  def list_bill_amounts(%RecurringBill{id: id}) do
+    BillAmount
+    |> where([a], a.recurring_bill_id == ^id)
+    |> order_by([a], asc: a.starts_on)
+    |> Repo.all()
+  end
+
+  def effective_bill_amount([], _competence), do: nil
+
+  def effective_bill_amount([first | _] = rows, %Date{} = competence) do
+    month = Date.beginning_of_month(competence)
+
+    rows
+    |> Enum.take_while(&(Date.compare(&1.starts_on, month) != :gt))
+    |> List.last()
+    |> Kernel.||(first)
+  end
+
+  def change_amount_from(%RecurringBill{} = bill, %Date{} = month, amount) do
+    month = Date.beginning_of_month(month)
+
+    Repo.transact(fn ->
+      with :ok <- keep_previous_amount(bill, month),
+           {:ok, _row} <- upsert_bill_amount(bill, month, amount) do
+        sync_current_amount(bill)
+      end
+    end)
+  end
+
+  def put_bill_amount(%RecurringBill{} = bill, %Date{} = month, amount) do
+    Repo.transact(fn ->
+      with {:ok, _row} <- upsert_bill_amount(bill, Date.beginning_of_month(month), amount) do
+        sync_current_amount(bill)
+      end
+    end)
+  end
+
+  def delete_bill_amount(%RecurringBill{} = bill, id) when is_integer(id) do
+    row = Repo.get_by(BillAmount, id: id, recurring_bill_id: bill.id)
+
+    Repo.transact(fn -> drop_bill_amount(bill, row) end)
+  end
+
+  defp drop_bill_amount(_bill, nil), do: {:error, :not_found}
+
+  defp drop_bill_amount(bill, row) do
+    with {:ok, _deleted} <- Repo.delete(row), do: sync_current_amount(bill)
+  end
+
+  defp put_effective_amounts(bills, nil), do: bills
+  defp put_effective_amounts([], _competence), do: []
+
+  defp put_effective_amounts(bills, competence) do
+    rows =
+      BillAmount
+      |> where([a], a.recurring_bill_id in ^Enum.map(bills, & &1.id))
+      |> order_by([a], asc: a.starts_on)
+      |> Repo.all()
+      |> Enum.group_by(& &1.recurring_bill_id)
+
+    Enum.map(bills, fn bill ->
+      case rows |> Map.get(bill.id, []) |> effective_bill_amount(competence) do
+        nil -> bill
+        row -> %{bill | expected_amount: row.expected_amount}
+      end
+    end)
+  end
+
+  defp correct_amount(bill, previous, month) do
+    if Decimal.equal?(bill.expected_amount, previous),
+      do: {:ok, bill},
+      else: rewrite_amount(bill, list_bill_amounts(bill), month)
+  end
+
+  defp rewrite_amount(bill, [], _month), do: {:ok, bill}
+
+  defp rewrite_amount(bill, rows, month) do
+    with {:ok, _row} <-
+           rows
+           |> effective_bill_amount(month)
+           |> BillAmount.changeset(%{expected_amount: bill.expected_amount})
+           |> Repo.update() do
+      sync_current_amount(bill)
+    end
+  end
+
+  defp keep_previous_amount(bill, month) do
+    case list_bill_amounts(bill) do
+      [] ->
+        with {:ok, _row} <-
+               upsert_bill_amount(bill, previous_month(bill, month), bill.expected_amount),
+             do: :ok
+
+      _rows ->
+        :ok
+    end
+  end
+
+  defp previous_month(%RecurringBill{starts_on: %Date{} = starts_on}, month) do
+    if Date.compare(starts_on, month) == :lt, do: starts_on, else: Date.shift(month, month: -1)
+  end
+
+  defp previous_month(_bill, month), do: Date.shift(month, month: -1)
+
+  defp upsert_bill_amount(bill, month, amount) do
+    attrs = %{recurring_bill_id: bill.id, starts_on: month, expected_amount: amount}
+
+    case Repo.get_by(BillAmount, recurring_bill_id: bill.id, starts_on: month) do
+      nil -> %BillAmount{} |> BillAmount.changeset(attrs) |> Repo.insert()
+      row -> row |> BillAmount.changeset(attrs) |> Repo.update()
+    end
+  end
+
+  defp sync_current_amount(bill) do
+    current = expected_amount_at(bill, Date.utc_today())
+
+    if Decimal.equal?(current, bill.expected_amount),
+      do: {:ok, bill},
+      else: bill |> Ecto.Changeset.change(expected_amount: current) |> Repo.update()
   end
 
   def delete_recurring_bill(%RecurringBill{} = bill), do: Repo.delete(bill)

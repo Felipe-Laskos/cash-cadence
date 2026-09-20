@@ -27,7 +27,8 @@ defmodule CashCadenceWeb.BillLive.Index do
     socket =
       socket
       |> assign(month: month, editing: editing, form_open?: form_open?)
-      |> assign_form(bill_changeset(editing, params["kind"]))
+      |> assign(amounts: bill_amounts(editing), amount_decision: nil, new_amount: %{})
+      |> assign_form(bill_changeset(editing, params["kind"], month))
       |> reload()
 
     {:noreply, socket}
@@ -47,16 +48,23 @@ defmodule CashCadenceWeb.BillLive.Index do
     )
   end
 
-  defp bill_changeset(nil, kind),
+  defp bill_amounts(nil), do: []
+  defp bill_amounts(%RecurringBill{} = bill), do: Budgets.list_bill_amounts(bill)
+
+  defp bill_changeset(nil, kind, _month),
     do: Budgets.change_recurring_bill(%RecurringBill{}, %{kind: new_kind(kind)})
 
-  defp bill_changeset(%RecurringBill{} = bill, _kind) do
-    Budgets.change_recurring_bill(%{
+  defp bill_changeset(%RecurringBill{} = bill, _kind, month),
+    do: bill |> editing_struct(month) |> Budgets.change_recurring_bill()
+
+  defp editing_struct(%RecurringBill{} = bill, month) do
+    %{
       bill
-      | category_name: bill.category && bill.category.name,
+      | expected_amount: Budgets.expected_amount_at(bill, month),
+        category_name: bill.category && bill.category.name,
         starts_month: bill.starts_on && month_param(bill.starts_on),
         ends_month: bill.ends_on && month_param(bill.ends_on)
-    })
+    }
   end
 
   defp new_kind("income"), do: :income
@@ -113,33 +121,39 @@ defmodule CashCadenceWeb.BillLive.Index do
   end
 
   @impl true
-  def handle_event("validate", %{"recurring_bill" => params}, socket) do
+  def handle_event("validate", %{"recurring_bill" => params} = payload, socket) do
     changeset =
       (socket.assigns.editing || %RecurringBill{})
       |> Budgets.change_recurring_bill(params)
       |> Map.put(:action, :validate)
 
-    {:noreply, assign_form(socket, changeset)}
+    {:noreply,
+     socket |> assign(new_amount: payload["new_amount"] || %{}) |> assign_form(changeset)}
   end
 
   def handle_event("save", %{"recurring_bill" => params}, socket) do
-    result =
-      with {:ok, params} <- resolve_category(params) do
-        case socket.assigns.editing do
-          nil -> Budgets.create_recurring_bill(params)
-          bill -> Budgets.update_recurring_bill(bill, params)
-        end
-      end
+    case amount_change(socket.assigns.editing, socket.assigns.month, params) do
+      nil -> persist(socket, params, nil)
+      decision -> {:noreply, assign(socket, amount_decision: decision)}
+    end
+  end
 
-    case result do
-      {:ok, bill} ->
+  def handle_event("confirm_amount", %{"mode" => mode}, socket),
+    do: persist(socket, socket.assigns.amount_decision.params, mode)
+
+  def handle_event("cancel_amount", _params, socket),
+    do: {:noreply, assign(socket, amount_decision: nil)}
+
+  def handle_event("add_amount", _params, socket), do: add_amount(socket)
+
+  def handle_event("remove_amount", %{"id" => id}, socket) do
+    case Budgets.delete_bill_amount(socket.assigns.editing, String.to_integer(id)) do
+      {:ok, _bill} ->
         {:noreply,
-         socket
-         |> put_flash(:info, "#{String.capitalize(kind_noun(bill.kind))} salva.")
-         |> push_patch(to: bills_path(socket.assigns))}
+         socket |> put_flash(:info, "Valor removido do histórico.") |> refresh_editing()}
 
-      {:error, changeset} ->
-        {:noreply, assign_form(socket, changeset)}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Não consegui remover esse valor.")}
     end
   end
 
@@ -158,19 +172,137 @@ defmodule CashCadenceWeb.BillLive.Index do
 
   def handle_event("adjust", %{"id" => id, "amount" => amount}, socket) do
     bill = Budgets.get_recurring_bill!(id)
-    {:ok, _} = Budgets.update_recurring_bill(bill, %{expected_amount: amount})
+    month = socket.assigns.month
+    {:ok, _bill} = Budgets.change_amount_from(bill, month, amount)
 
     {:noreply,
      socket
-     |> put_flash(:info, "Valor esperado ajustado para #{brl(Decimal.new(amount))}.")
+     |> put_flash(
+       :info,
+       "Esperado ajustado para #{brl(Decimal.new(amount))} de #{month_short(month)} em diante."
+     )
      |> reload()}
   end
 
-  def handle_event("toggle", %{"id" => id}, socket) do
+  def handle_event("end_bill", %{"id" => id}, socket) do
     bill = Budgets.get_recurring_bill!(id)
-    {:ok, _} = Budgets.update_recurring_bill(bill, %{active: !bill.active})
-    {:noreply, reload(socket)}
+    ends_on = Date.shift(socket.assigns.month, month: -1)
+
+    case Budgets.update_recurring_bill(bill, %{ends_on: ends_on}) do
+      {:ok, _bill} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "#{String.capitalize(kind_noun(bill.kind))} encerrada em #{month_short(ends_on)}. " <>
+             "Os meses anteriores continuam como estavam."
+         )
+         |> reload()}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Essa fixa começa depois de #{month_short(ends_on)}.")}
+    end
   end
+
+  defp amount_change(nil, _month, _params), do: nil
+
+  defp amount_change(%RecurringBill{} = bill, month, params) do
+    effective = Budgets.expected_amount_at(bill, month)
+
+    case Money.parse(params["expected_amount"] || "") do
+      {:ok, amount} ->
+        if Decimal.equal?(amount, effective),
+          do: nil,
+          else: %{params: params, from: effective, to: amount}
+
+      :error ->
+        nil
+    end
+  end
+
+  defp persist(%{assigns: %{editing: editing, month: month}} = socket, params, mode) do
+    result =
+      with {:ok, params} <- resolve_category(params) do
+        save_bill(editing, params, month, mode)
+      end
+
+    case result do
+      {:ok, bill} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, saved_flash(bill, mode, month))
+         |> push_patch(to: bills_path(socket.assigns))}
+
+      {:error, %Ecto.Changeset{data: %RecurringBill{}} = changeset} ->
+        {:noreply, socket |> assign(amount_decision: nil) |> assign_form(changeset)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(amount_decision: nil)
+         |> put_flash(:error, "Não consegui salvar esse valor.")}
+    end
+  end
+
+  defp save_bill(nil, params, _month, _mode), do: Budgets.create_recurring_bill(params)
+
+  defp save_bill(bill, params, month, "from") do
+    {amount, params} = Map.pop(params, "expected_amount")
+
+    with {:ok, bill} <- Budgets.update_recurring_bill(bill, params, on: month),
+         do: Budgets.change_amount_from(bill, month, amount)
+  end
+
+  defp save_bill(bill, params, month, _mode),
+    do: Budgets.update_recurring_bill(bill, params, on: month)
+
+  defp saved_flash(bill, "from", month) do
+    "#{String.capitalize(kind_noun(bill.kind))} salva. O novo valor vale de " <>
+      "#{month_short(month)} em diante."
+  end
+
+  defp saved_flash(bill, _mode, _month), do: "#{String.capitalize(kind_noun(bill.kind))} salva."
+
+  defp add_amount(%{assigns: %{editing: %RecurringBill{} = bill}} = socket) do
+    new = socket.assigns.new_amount
+
+    with {:ok, starts_on} <- parse_month(new["month"]),
+         {:ok, amount} <- Money.parse(new["value"] || ""),
+         {:ok, _bill} <- Budgets.put_bill_amount(bill, starts_on, amount) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "De #{month_short(starts_on)} em diante: #{brl(amount)}.")
+       |> refresh_editing()}
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Informe o mês e um valor maior que zero.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Não consegui gravar esse valor.")}
+    end
+  end
+
+  defp add_amount(socket), do: {:noreply, socket}
+
+  defp refresh_editing(%{assigns: %{month: month}} = socket) do
+    bill = Budgets.get_recurring_bill!(socket.assigns.editing.id)
+
+    socket
+    |> assign(editing: bill, amounts: Budgets.list_bill_amounts(bill), amount_decision: nil)
+    |> assign_form(typed_changeset(bill, month, socket.assigns.form.params))
+    |> reload()
+  end
+
+  defp typed_changeset(bill, month, params) when is_map(params) do
+    bill
+    |> editing_struct(month)
+    |> Budgets.change_recurring_bill(
+      Map.put(params, "expected_amount", input_amount(Budgets.expected_amount_at(bill, month)))
+    )
+  end
+
+  defp typed_changeset(bill, month, _params), do: bill_changeset(bill, nil, month)
 
   defp due_soon?(%{due_in: due_in}), do: is_integer(due_in) and due_in >= 0 and due_in <= 7
 
@@ -192,6 +324,10 @@ defmodule CashCadenceWeb.BillLive.Index do
   defp adherence_text(%{status: :unpaid}), do: "Em aberto"
   defp adherence_text(%{status: :none}), do: "—"
 
+  defp shares_category?(items, item) do
+    Enum.count(items, &(&1.bill.category_id == item.bill.category_id)) > 1
+  end
+
   defp launch_path(month, item) do
     ~p"/lancamentos?#{%{"m" => month_param(month), "new" => "1", "kind" => "expense", "category_name" => item.bill.category.name, "amount" => input_amount(item.remaining)}}"
   end
@@ -199,7 +335,13 @@ defmodule CashCadenceWeb.BillLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} nav={:bills} inbox_count={@inbox_count}>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      nav={:bills}
+      inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
+    >
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 class="text-3xl font-bold tracking-tight">Despesas fixas</h1>
@@ -376,8 +518,113 @@ defmodule CashCadenceWeb.BillLive.Index do
                 </div>
               </div>
             </.form_section>
+
+            <.form_section
+              :if={@editing}
+              title="Histórico de valores"
+              hint="Cada valor vale do mês dele em diante. Os meses anteriores guardam o que valia neles."
+            >
+              <ul
+                id="bill-amounts"
+                class="divide-y divide-base-300 rounded-lg border border-base-300 text-sm"
+              >
+                <li :if={@amounts == []} class="px-3 py-2 text-base-content/60">
+                  Um valor só, que vale em todos os meses.
+                </li>
+                <li
+                  :for={{row, index} <- Enum.with_index(@amounts)}
+                  id={"bill-amount-#{row.id}"}
+                  class="flex items-center justify-between gap-3 px-3 py-2"
+                >
+                  <span class="flex items-center gap-2">
+                    <span class="font-medium">{amount_range_label(@amounts, index)}</span>
+                    <.badge :if={current_amount_id(@amounts, @month) == row.id} kind={:accent}>
+                      vale em {month_short(@month)}
+                    </.badge>
+                  </span>
+                  <span class="flex items-center gap-2">
+                    <span class="tabular font-semibold">{brl(row.expected_amount)}</span>
+                    <button
+                      type="button"
+                      phx-click="remove_amount"
+                      phx-value-id={row.id}
+                      class="btn btn-ghost btn-xs btn-square"
+                      aria-label="Remover valor"
+                    >
+                      <.icon name="hero-trash-micro" class="size-4" />
+                    </button>
+                  </span>
+                </li>
+              </ul>
+
+              <div
+                id={"new-amount-#{length(@amounts)}"}
+                class="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+              >
+                <.input
+                  type="month"
+                  name="new_amount[month]"
+                  value={month_param(@month)}
+                  label="A partir de"
+                />
+                <.input
+                  type="text"
+                  name="new_amount[value]"
+                  value=""
+                  label="Valor"
+                  inputmode="decimal"
+                  placeholder="0,00"
+                  class="input tabular w-full text-right"
+                />
+                <button
+                  type="button"
+                  id="add-bill-amount"
+                  phx-click="add_amount"
+                  class="btn btn-sm mb-1"
+                >
+                  Registrar valor
+                </button>
+              </div>
+            </.form_section>
           </.modal_body>
-          <.modal_footer>
+
+          <div
+            :if={@amount_decision}
+            id="amount-decision"
+            class="border-t border-base-300 bg-base-200/40 px-5 py-4"
+          >
+            <p class="text-sm font-semibold">
+              O valor passa de {brl(@amount_decision.from)} para {brl(@amount_decision.to)}.
+            </p>
+            <p class="mt-1 text-xs text-base-content/60">
+              Em {month_label(@month)} vale {brl(@amount_decision.from)} hoje. O que aconteceu?
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                id="amount-from"
+                phx-click="confirm_amount"
+                phx-value-mode="from"
+                class="btn btn-primary btn-sm"
+              >
+                Mudou a partir de {month_short(@month)}
+              </button>
+              <button
+                type="button"
+                id="amount-correct"
+                phx-click="confirm_amount"
+                phx-value-mode="correct"
+                class="btn btn-sm"
+              >
+                {correct_label(@amounts, @month)}
+              </button>
+              <button type="button" phx-click="cancel_amount" class="btn btn-ghost btn-sm">
+                Voltar
+              </button>
+            </div>
+          </div>
+
+          <.modal_footer :if={is_nil(@amount_decision)}>
             <button type="button" phx-click="cancel" class="btn btn-ghost">Cancelar</button>
             <.button variant="primary" phx-disable-with="Salvando…">{if @editing,
               do: "Salvar",
@@ -415,7 +662,16 @@ defmodule CashCadenceWeb.BillLive.Index do
                     até {month_short(item.bill.ends_on)}
                   </span>
                 </td>
-                <td><.category_chip category={item.bill.category} show_fixed={false} /></td>
+                <td>
+                  <.category_chip category={item.bill.category} show_fixed={false} />
+                  <span
+                    :if={shares_category?(@panel.items, item)}
+                    class="text-base-content/50 block text-xs"
+                    title="Com duas fixas na mesma categoria, o que conta como pago é filtrado pelo texto no extrato e pelo valor"
+                  >
+                    divide a categoria
+                  </span>
+                </td>
                 <td class="text-base-content/60">
                   {if item.due_on, do: "dia #{item.due_on.day}", else: "—"}
                   <.badge :if={item.overdue?} kind={:unpaid}>atrasada</.badge>
@@ -454,10 +710,21 @@ defmodule CashCadenceWeb.BillLive.Index do
                       <.icon name="hero-pencil-square-micro" class="size-4" />
                     </.link>
                     <button
+                      :if={is_nil(item.bill.ends_on)}
+                      type="button"
+                      phx-click="end_bill"
+                      phx-value-id={item.bill.id}
+                      data-confirm={"Encerrar #{item.bill.name} a partir de #{month_label(@month)}? Os meses anteriores continuam como estão."}
+                      class="btn btn-ghost btn-xs btn-square"
+                      aria-label="Encerrar"
+                    >
+                      <.icon name="hero-archive-box-micro" class="size-4" />
+                    </button>
+                    <button
                       type="button"
                       phx-click="delete"
                       phx-value-id={item.bill.id}
-                      data-confirm="Excluir esta despesa fixa? Os lançamentos continuam no livro."
+                      data-confirm="Excluir esta despesa fixa? Ela some de todos os meses, inclusive os passados. Os lançamentos continuam no livro."
                       class="btn btn-ghost btn-xs btn-square"
                       aria-label="Excluir"
                     >
@@ -500,7 +767,15 @@ defmodule CashCadenceWeb.BillLive.Index do
               </thead>
               <tbody>
                 <tr :for={income <- @incomes} id={"income-#{income.bill.id}"}>
-                  <td class="font-medium">{income.bill.name}</td>
+                  <td class="font-medium">
+                    {income.bill.name}
+                    <span
+                      :if={shares_category?(@incomes, income)}
+                      class="text-base-content/50 block text-xs"
+                    >
+                      divide a categoria com outra receita fixa
+                    </span>
+                  </td>
                   <td class="tabular text-right">{amount(income.expected)}</td>
                   <td>
                     <.badge :if={income.status == :received} kind={:paid}>
@@ -521,7 +796,7 @@ defmodule CashCadenceWeb.BillLive.Index do
                         type="button"
                         phx-click="delete"
                         phx-value-id={income.bill.id}
-                        data-confirm="Excluir esta receita fixa? Os lançamentos continuam no livro."
+                        data-confirm="Excluir esta receita fixa? Ela some de todos os meses, inclusive os passados. Os lançamentos continuam no livro."
                         class="btn btn-ghost btn-xs btn-square"
                         aria-label="Excluir"
                       >
@@ -579,6 +854,39 @@ defmodule CashCadenceWeb.BillLive.Index do
         |> Decimal.round(0)
         |> Decimal.to_integer()
     end
+  end
+
+  defp current_amount_id(amounts, month) do
+    case Budgets.effective_bill_amount(amounts, month) do
+      nil -> nil
+      row -> row.id
+    end
+  end
+
+  defp amount_range_label(amounts, index) do
+    row = Enum.at(amounts, index)
+
+    case Enum.at(amounts, index + 1) do
+      nil when index == 0 ->
+        "todos os meses"
+
+      nil ->
+        "de #{month_short(row.starts_on)} em diante"
+
+      next when index == 0 ->
+        "até #{month_short(Date.shift(next.starts_on, month: -1))}"
+
+      next ->
+        "#{month_short(row.starts_on)} a #{month_short(Date.shift(next.starts_on, month: -1))}"
+    end
+  end
+
+  defp correct_label([], _month), do: "Corrigir: sempre foi esse valor"
+  defp correct_label([_single], _month), do: "Corrigir: sempre foi esse valor"
+
+  defp correct_label(amounts, month) do
+    index = Enum.find_index(amounts, &(&1.id == current_amount_id(amounts, month)))
+    "Corrigir o valor de #{amount_range_label(amounts, index)}"
   end
 
   defp open_text(%{items: items}) do

@@ -187,6 +187,9 @@ defmodule CashCadenceWeb.BillLiveTest do
     |> form("#bill-form", recurring_bill: %{expected_amount: "6.700,00"})
     |> render_submit()
 
+    assert has_element?(view, "#amount-decision")
+    view |> element("#amount-correct") |> render_click()
+
     assert Decimal.equal?(
              Budgets.get_recurring_bill!(income.id).expected_amount,
              Decimal.new("6700.00")
@@ -195,6 +198,73 @@ defmodule CashCadenceWeb.BillLiveTest do
     view |> element("#income-#{income.id} button[aria-label='Excluir']") |> render_click()
     assert render(view) =~ "Receita fixa excluída."
     refute has_element?(view, "#income-#{income.id}")
+  end
+
+  test "changes the amount from the open month and leaves the earlier ones alone", %{conn: conn} do
+    fuel = recurring_bill_fixture(%{name: "Combustível", expected_amount: "500.00"})
+    transaction_fixture(%{date: ~D[2026-08-12], amount: "300.00", category_id: fuel.category_id})
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-09&edit=#{fuel.id}")
+
+    view
+    |> form("#bill-form", recurring_bill: %{expected_amount: "250,00"})
+    |> render_submit()
+
+    assert has_element?(view, "#amount-decision")
+    assert has_element?(view, "#amount-from", "Mudou a partir de set/26")
+
+    view |> element("#amount-from") |> render_click()
+
+    assert render(view) =~ "O novo valor vale de set/26 em diante."
+    assert has_element?(view, "#bill-#{fuel.id}", "250,00")
+
+    {:ok, august, _html} = live(conn, ~p"/fixas?m=2026-08")
+    assert has_element?(august, "#bill-#{fuel.id}", "500,00")
+    assert has_element?(august, "#bill-#{fuel.id}", "Parcial · faltam 200,00")
+  end
+
+  test "records and removes a value in the history", %{conn: conn} do
+    bill = recurring_bill_fixture(%{name: "Aluguel", expected_amount: "1000.00"})
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-09&edit=#{bill.id}")
+    assert has_element?(view, "#bill-amounts", "Um valor só")
+
+    view
+    |> form("#bill-form", new_amount: %{month: "2026-05", value: "1.200,00"})
+    |> render_change()
+
+    view |> element("#add-bill-amount") |> render_click()
+
+    view
+    |> form("#bill-form", new_amount: %{month: "2026-09", value: "1.500,00"})
+    |> render_change()
+
+    view |> element("#add-bill-amount") |> render_click()
+
+    [may, september] = Budgets.list_bill_amounts(bill)
+    assert has_element?(view, "#bill-amount-#{may.id}", "até ago/26")
+    assert has_element?(view, "#bill-amount-#{september.id}", "de set/26 em diante")
+    assert has_element?(view, "#bill-#{bill.id}", "1.500,00")
+
+    view
+    |> element("#bill-amount-#{september.id} button[aria-label='Remover valor']")
+    |> render_click()
+
+    assert has_element?(view, "#bill-#{bill.id}", "1.200,00")
+    refute has_element?(view, "#bill-amount-#{september.id}")
+  end
+
+  test "ends a bill from the open month and keeps the earlier ones", %{conn: conn} do
+    bill = recurring_bill_fixture(%{name: "Academia", expected_amount: "120.00"})
+
+    {:ok, view, _html} = live(conn, ~p"/fixas?m=2026-09")
+    view |> element("#bill-#{bill.id} button[aria-label='Encerrar']") |> render_click()
+
+    assert render(view) =~ "encerrada em ago/26"
+    refute has_element?(view, "#bill-#{bill.id}")
+
+    {:ok, august, _html} = live(conn, ~p"/fixas?m=2026-08")
+    assert has_element?(august, "#bill-#{bill.id}")
   end
 
   test "wires the category field to the suggestion typeahead", %{conn: conn} do
