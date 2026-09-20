@@ -3,7 +3,7 @@ defmodule CashCadence.Imports.PDFParsersTest do
 
   alias CashCadence.Imports.{BrFormat, Sniffer}
   alias CashCadence.Imports.Parsers
-  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement}
+  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement, NubankStatement}
 
   @fixtures Path.expand("../../support/fixtures/imports", __DIR__)
 
@@ -169,6 +169,66 @@ defmodule CashCadence.Imports.PDFParsersTest do
       assert {:error, {:unknown_layout, text}} = Parsers.PDF.parse(fixture("outro.pdf"))
       assert text =~ "Documento qualquer"
       assert Parsers.PDF.parse("%PDF-1.4\n/Encrypt 1 0 R\n") == {:error, :encrypted}
+    end
+  end
+
+  describe "NubankStatement.parse_text/1" do
+    test "reads the day sections, joins wrapped descriptions and validates the balance chain" do
+      text = fixture("nubank_extrato.txt")
+      assert NubankStatement.recognizes?(text)
+      refute ItauStatement.recognizes?(text)
+      assert {:ok, parsed} = NubankStatement.parse_text(text)
+
+      assert parsed.bank == :nubank
+      assert parsed.account == %{bank_id: "260", account_ref: "1234567-8", kind: :checking}
+      assert parsed.period_start == ~D[2026-05-01]
+      assert parsed.period_end == ~D[2026-06-30]
+      assert Decimal.equal?(parsed.balance, Decimal.new("4500.50"))
+      assert parsed.warnings == []
+
+      [salary, agency, own, supplier, june] = parsed.transactions
+
+      assert salary.date == ~D[2026-05-07]
+      assert salary.posted_on == ~D[2026-05-07]
+      assert salary.kind == :income
+      assert Decimal.equal?(salary.amount, Decimal.new("3000.00"))
+      assert salary.payload["signed_amount"] == "3000.00"
+
+      assert salary.raw_description ==
+               "Transferência recebida pelo Pix - EMPRESA EXEMPLO LTDA - 00.000.000/0001-00 - " <>
+                 "BANCO EXEMPLO S.A. (0999) Agência: 50 Conta: 430090-7"
+
+      assert agency.date == ~D[2026-05-11]
+      assert agency.kind == :expense
+      assert Decimal.equal?(agency.amount, Decimal.new("500.00"))
+      assert agency.payload["signed_amount"] == "-500.00"
+      assert agency.raw_description =~ "Conta: 12345-6"
+
+      assert own.kind == :expense
+      assert Decimal.equal?(own.amount, Decimal.new("700.00"))
+      assert supplier.raw_description == "Pagamento de boleto efetuado - FORNECEDOR EXEMPLO LTDA"
+
+      assert june.date == ~D[2026-06-05]
+      assert june.kind == :income
+    end
+
+    test "reads an entry even when a single space separates the description from the amount" do
+      text = String.replace(fixture("nubank_extrato.txt"), ~r/ {2,}1\.300,00/, " 1.300,00")
+
+      assert {:ok, parsed} = NubankStatement.parse_text(text)
+      assert length(parsed.transactions) == 5
+      assert parsed.warnings == []
+    end
+
+    test "flags a day whose balance does not match the movements" do
+      text = String.replace(fixture("nubank_extrato.txt"), "1.500,00", "1.600,00")
+
+      assert {:ok, parsed} = NubankStatement.parse_text(text)
+      assert [broken_day, next_day] = parsed.warnings
+      assert broken_day =~ "Saldo de 11/05/2026 não bate"
+      assert broken_day =~ "o extrato mostra R$ 1.600,00"
+      assert broken_day =~ "diferença de R$ 100,00"
+      assert next_day =~ "Saldo de 05/06/2026 não bate"
     end
   end
 end

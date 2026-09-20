@@ -32,6 +32,9 @@ defmodule CashCadenceWeb.InboxLive do
     |> stream(:items, items, reset: true)
   end
 
+  defp counterpart_noun(:income), do: "receita"
+  defp counterpart_noun(_kind), do: "despesa"
+
   defp after_action(socket, item, message) do
     socket
     |> stream_delete(:items, item)
@@ -326,9 +329,31 @@ defmodule CashCadenceWeb.InboxLive do
                 class="alert alert-warning alert-soft py-2 text-sm"
               >
                 <.icon name="hero-arrow-path-micro" class="size-4" />
-                <span>Parece transferência: há um lançamento de {brl(
-                  item.counterpart_transaction.amount
-                )} em {short_date(item.counterpart_transaction.date)} do outro lado.</span>
+                <span :if={item.counterpart_transaction.kind == :transfer}>
+                  Parece transferência: há um lançamento de {brl(item.counterpart_transaction.amount)} em {short_date(
+                    item.counterpart_transaction.date
+                  )} do outro lado.
+                </span>
+                <label
+                  :if={item.counterpart_transaction.kind != :transfer}
+                  class="flex flex-wrap items-center gap-2"
+                >
+                  <input
+                    type="checkbox"
+                    name="item[link_counterpart]"
+                    value="true"
+                    checked
+                    class="checkbox checkbox-sm"
+                  />
+                  <span>
+                    Parece transferência: há um lançamento de
+                    <b>{brl(item.counterpart_transaction.amount)} em {short_date(
+                      item.counterpart_transaction.date
+                    )}</b>
+                    do outro lado. Marcado, aquele lançamento também vira transferência e para de
+                    contar como {counterpart_noun(item.counterpart_transaction.kind)}.
+                  </span>
+                </label>
               </div>
               <div
                 :if={"transfer" in item.flags and is_nil(item.counterpart_transaction)}

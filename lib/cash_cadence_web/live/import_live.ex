@@ -104,7 +104,8 @@ defmodule CashCadenceWeb.ImportLive do
     do: "#{name}: formato não reconhecido (aceito OFX, CSV do Nubank e PDF do Itaú)"
 
   defp failure({name, {:error, {:unknown_layout, _text}}}),
-    do: "#{name}: PDF não reconhecido, por enquanto só extrato e fatura do Itaú"
+    do:
+      "#{name}: PDF não reconhecido, por enquanto só extrato e fatura do Itaú e extrato do Nubank"
 
   defp failure({name, {:error, :encrypted}}),
     do: "#{name}: PDF protegido por senha, informe a senha no campo ao lado da conta"

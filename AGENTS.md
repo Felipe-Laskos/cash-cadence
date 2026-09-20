@@ -5,6 +5,26 @@ This is a web application written using the Phoenix web framework.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+### Development database
+
+`cash_cadence_dev` (localhost:5433) holds real, hand-entered data that exists nowhere else. Losing it means
+retyping months of statements, which is the exact problem this app exists to solve. Treat it like production.
+
+- `SELECT` freely — reads are always fine, and inspecting the data is often the fastest way to understand a bug
+- **Never** run `mix ecto.drop`, `mix ecto.reset`, `mix ecto.rollback`, or `mix run priv/repo/seeds.exs` against
+  dev. Ask first, every time, even when it looks like the obvious fix for a broken schema
+- **Never** hand-write `INSERT`, `UPDATE`, `DELETE`, or `TRUNCATE` against dev, whether through `psql`, `mix run`,
+  or IEx
+- Run tests with `MIX_ENV=test`. `cash_cadence_test` is disposable and is the only database you may drop,
+  recreate, or write to freely
+- Exercising the app through the UI is fine — that is the app working. Bulk or scripted writes are not
+- `mix ecto.migrate` on dev is fine for schema-only migrations. If a migration rewrites rows
+  (`execute("UPDATE ...")`), say so and ask before running it on dev
+- Run `mix cash.backup` before anything that touches dev data, and say which snapshot you created. `backups/`
+  also receives an automatic JSON snapshot every 24h (`config :cash_cadence, :backup`)
+- To check whether dev data changed, compare the newest `backups/*.json` against the current rows — `updated_at`
+  does not catch raw SQL writes. `mix cash.restore` puts a snapshot back
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content

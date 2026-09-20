@@ -134,10 +134,15 @@ defmodule CashCadence.Imports do
         competence: statement_competence || raw.competence || Date.beginning_of_month(raw.date)
     }
 
-    suggestion = with_bill_fallback(classification, raw, normalized)
     match = find_match(raw)
     {kind, counterpart, counterpart_item} = transfer_link(raw, account_id)
     transfer? = not is_nil(counterpart) or not is_nil(counterpart_item)
+
+    suggestion =
+      classification
+      |> with_bill_fallback(raw, normalized)
+      |> suggestion_for_kind(kind)
+
     reimbursement = reimbursement_candidate(kind, raw)
 
     %{
@@ -161,7 +166,7 @@ defmodule CashCadence.Imports do
         flags(
           match,
           transfer?,
-          known_fingerprint?(fingerprint),
+          known_fingerprint?(fingerprint, batch.id),
           suggestion.category_id,
           kind,
           reimbursement
@@ -221,6 +226,11 @@ defmodule CashCadence.Imports do
 
   defp with_bill_fallback(classification, _subject, _normalized), do: classification
 
+  defp suggestion_for_kind(_suggestion, :transfer),
+    do: %{category_id: nil, confidence: :none, source: nil}
+
+  defp suggestion_for_kind(suggestion, _kind), do: suggestion
+
   defp id_of(nil), do: nil
   defp id_of(%{id: id}), do: id
 
@@ -264,11 +274,12 @@ defmodule CashCadence.Imports do
     kind = reclassified_kind(item, classification)
 
     suggestion =
-      with_bill_fallback(
-        classification,
+      classification
+      |> with_bill_fallback(
         %{kind: kind, amount: item.amount, competence: item.competence},
         item.normalized_description
       )
+      |> suggestion_for_kind(kind)
 
     changes = %{
       suggested_category_id: suggestion.category_id,
@@ -343,10 +354,15 @@ defmodule CashCadence.Imports do
   defp find_match(raw),
     do: Ledger.find_manual_match(raw.kind, raw.amount, raw.date, @match_window_days)
 
-  defp known_fingerprint?(fingerprint) do
+  defp known_fingerprint?(fingerprint, batch_id) do
     Repo.exists?(
       from t in Transaction, where: t.fingerprint == ^fingerprint and is_nil(t.deleted_at)
-    )
+    ) or
+      Repo.exists?(
+        from i in InboxItem,
+          where:
+            i.fingerprint == ^fingerprint and i.status == :pending and i.batch_id != ^batch_id
+      )
   end
 
   defp flags(match, transfer?, possible_duplicate?, suggested_category_id, kind, reimbursement) do
@@ -471,7 +487,8 @@ defmodule CashCadence.Imports do
       case Ledger.create_transaction(transaction_attrs) do
         {:ok, transaction} ->
           finish(item, :approved, transaction)
-          Classifier.learn(item.normalized_description, transaction.category_id)
+          learn_category(item, transaction)
+          convert_counterpart(item, attrs)
           plan_installments(item, transaction)
           transaction
 
@@ -480,6 +497,26 @@ defmodule CashCadence.Imports do
       end
     end)
   end
+
+  defp convert_counterpart(%InboxItem{counterpart_transaction_id: id}, %{
+         "link_counterpart" => flag
+       })
+       when not is_nil(id) and flag in ["true", "on"] do
+    case Repo.get(Transaction, id) do
+      %Transaction{kind: kind} = counterpart when kind != :transfer ->
+        Ledger.update_transaction(counterpart, %{"kind" => :transfer, "category_id" => nil})
+
+      _other ->
+        :ok
+    end
+  end
+
+  defp convert_counterpart(_item, _attrs), do: :ok
+
+  defp learn_category(_item, %Transaction{kind: :transfer}), do: :ok
+
+  defp learn_category(item, %Transaction{} = transaction),
+    do: Classifier.learn(item.normalized_description, transaction.category_id)
 
   def installment_forecast(
         %InboxItem{payload: %{"installment" => %{"number" => number, "of" => of}}} = item,
@@ -569,7 +606,7 @@ defmodule CashCadence.Imports do
            }) do
         {:ok, transaction} ->
           finish(item, :merged, transaction)
-          Classifier.learn(item.normalized_description, transaction.category_id)
+          learn_category(item, transaction)
           transaction
 
         {:error, changeset} ->

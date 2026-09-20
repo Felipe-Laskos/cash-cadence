@@ -115,4 +115,25 @@ defmodule CashCadence.ImportsClassifierTest do
     assert store.suggested_category_id == electronics.id
     assert store.confidence == :high
   end
+
+  test "the card invoice payment takes no category from the memory and teaches none back" do
+    assinatura = category_fixture(%{name: "Assinatura"})
+    :ok = Classifier.learn("FATURA PAGA BANCO EXEMPLO", assinatura.id)
+
+    assert {:ok, _batch} = Imports.ingest_file(fixture("itau_extrato.pdf"))
+
+    payment = Enum.find(Imports.list_inbox(), &(&1.kind == :transfer))
+    assert payment.normalized_description == "FATURA PAGA BANCO EXEMPLO"
+    assert payment.suggested_category_id == nil
+    assert payment.confidence == :none
+    refute payment.payload["suggestion_source"]
+    refute "uncategorized" in payment.flags
+    assert Imports.reclassify_pending() == 0
+
+    assert {:ok, transaction} = Imports.approve(payment, %{"category_name" => "Assinatura"})
+    assert transaction.kind == :transfer
+
+    assert [memory] = Classifier.list_memory("fatura")
+    assert memory.uses == 1
+  end
 end

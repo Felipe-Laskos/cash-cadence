@@ -114,4 +114,70 @@ defmodule CashCadence.BudgetsTest do
       assert Budgets.list_recurring_bills() == []
     end
   end
+
+  describe "match text" do
+    test "does not shrink what counts as paid when the category has a single bill" do
+      bill =
+        recurring_bill_fixture(%{
+          name: "Combustível",
+          expected_amount: "300.00",
+          match_text: "POSTO"
+        })
+
+      transaction_fixture(%{
+        date: ~D[2026-05-03],
+        amount: "90.00",
+        category_id: bill.category_id,
+        raw_description: "PIX QRS POSTO EXEMPLO"
+      })
+
+      transaction_fixture(%{
+        date: ~D[2026-05-17],
+        amount: "90.00",
+        category_id: bill.category_id,
+        description: "Abastecida"
+      })
+
+      [item] = Budgets.month_panel(~D[2026-05-01]).items
+      assert item.bill.id == bill.id
+      assert_money(item.paid, "180.00")
+      assert item.status == :partial
+    end
+
+    test "splits two bills that share a category by text and amount" do
+      rent = category_fixture(%{name: "Aluguéis", kind: :income})
+
+      store =
+        recurring_bill_fixture(%{
+          name: "Aluguel da loja",
+          kind: :income,
+          expected_amount: "1200.00",
+          category_id: rent.id,
+          match_text: "ALUGUEL"
+        })
+
+      warehouse =
+        recurring_bill_fixture(%{
+          name: "Aluguel do galpão",
+          kind: :income,
+          expected_amount: "3400.00",
+          category_id: rent.id,
+          match_text: "ALUGUEL"
+        })
+
+      transaction_fixture(%{
+        date: ~D[2026-05-05],
+        kind: :income,
+        amount: "1200.00",
+        category_id: rent.id,
+        normalized_description: "ALUGUEL EXEMPLO"
+      })
+
+      incomes = Budgets.expected_incomes(~D[2026-05-01])
+      received = Map.new(incomes, &{&1.bill.id, &1.received})
+
+      assert_money(Map.fetch!(received, store.id), "1200.00")
+      assert_money(Map.fetch!(received, warehouse.id), "0")
+    end
+  end
 end

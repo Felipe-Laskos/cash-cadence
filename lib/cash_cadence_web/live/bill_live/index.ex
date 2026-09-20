@@ -85,7 +85,7 @@ defmodule CashCadenceWeb.BillLive.Index do
     {noun, event} =
       if kind == :income, do: {"receita", "recebimento"}, else: {"despesa", "pagamento"}
 
-    "Opcional. Sem vigência, a #{noun} vale todo mês. Com texto no extrato, o #{event} é reconhecido pela descrição do banco (valor até 10% acima ou abaixo do esperado), e não pela categoria."
+    "Opcional. Sem vigência, a #{noun} vale todo mês. O texto no extrato ajuda a reconhecer o #{event} na importação."
   end
 
   defp bills_path(assigns, overrides \\ %{}) do
@@ -368,6 +368,11 @@ defmodule CashCadenceWeb.BillLive.Index do
                     placeholder="Ex.: RECEITA FEDERAL"
                     class="input w-full font-mono uppercase"
                   />
+                  <p class="mt-1 text-xs text-base-content/50">
+                    O que conta como pago continua sendo tudo da categoria no mês. Este texto só
+                    filtra, por descrição e valor (10% de folga), quando duas fixas dividem a mesma
+                    categoria.
+                  </p>
                 </div>
               </div>
             </.form_section>

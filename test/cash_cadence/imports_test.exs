@@ -70,6 +70,36 @@ defmodule CashCadence.ImportsTest do
       assert csv_batch.bank_account_id == account.id
     end
 
+    test "offers reconciliation for a row that came from the spreadsheet" do
+      sheet =
+        transaction_fixture(%{
+          date: ~D[2026-05-23],
+          amount: "48.82",
+          source: :spreadsheet,
+          external_id: "planilha:12"
+        })
+
+      assert {:ok, batch} = Imports.ingest_file(fixture("nubank_conta.ofx"))
+      assert batch.counts["matched"] == 1
+
+      [bakery | _] = Imports.list_inbox()
+      assert bakery.match_transaction_id == sheet.id
+      assert "match" in bakery.flags
+    end
+
+    test "does not offer a row that already carries bank data" do
+      transaction_fixture(%{
+        date: ~D[2026-05-23],
+        amount: "48.82",
+        source: :spreadsheet,
+        external_id: "planilha:12",
+        fingerprint: "ja-conciliado"
+      })
+
+      assert {:ok, batch} = Imports.ingest_file(fixture("nubank_conta.ofx"))
+      assert batch.counts["matched"] == 0
+    end
+
     test "matches manual transactions, suggests categories and flags likely duplicates" do
       food = category_fixture(%{name: "Comida"})
 
@@ -121,6 +151,56 @@ defmodule CashCadence.ImportsTest do
       assert tax.kind == :transfer
       assert tax.counterpart_transaction_id
       assert "transfer" in tax.flags
+    end
+  end
+
+  describe "transfers with an approved counterpart" do
+    setup do
+      nubank = bank_account_fixture(%{name: "Nubank"})
+      itau = bank_account_fixture(%{name: "Itaú"})
+      salary = category_fixture(%{name: "Salário", kind: :income})
+
+      counterpart =
+        transaction_fixture(%{
+          date: ~D[2026-05-11],
+          kind: :income,
+          amount: "390.00",
+          bank_account_id: itau.id,
+          category_id: salary.id
+        })
+
+      {:ok, _batch} = Imports.ingest_file(fixture("nubank_conta.ofx"), bank_account_id: nubank.id)
+
+      item =
+        Enum.find(
+          Imports.list_inbox(),
+          &(&1.external_id == "22222222-2222-2222-2222-222222222222")
+        )
+
+      %{item: item, counterpart: counterpart}
+    end
+
+    test "flips the approved side when asked", %{item: item, counterpart: counterpart} do
+      assert item.kind == :transfer
+      assert item.counterpart_transaction_id == counterpart.id
+
+      assert {:ok, transaction} = Imports.approve(item, %{"link_counterpart" => "true"})
+      assert transaction.kind == :transfer
+
+      other_side = Ledger.get_transaction!(counterpart.id)
+      assert other_side.kind == :transfer
+      assert other_side.category_id == nil
+    end
+
+    test "leaves the approved side untouched when not asked", %{
+      item: item,
+      counterpart: counterpart
+    } do
+      assert {:ok, _transaction} = Imports.approve(item, %{})
+
+      other_side = Ledger.get_transaction!(counterpart.id)
+      assert other_side.kind == :income
+      assert other_side.category_id == counterpart.category_id
     end
   end
 

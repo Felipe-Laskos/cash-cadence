@@ -1,7 +1,7 @@
 defmodule CashCadence.Imports.Parsers.PDF do
   @moduledoc false
 
-  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement, OCR, Text}
+  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement, NubankStatement, OCR, Text}
 
   @card_crop %{x: 0, y: 0, w: 330, h: 842}
   @ocr_warning "Texto obtido por OCR, porque o arquivo era só imagem: confira datas e valores antes de aprovar."
@@ -17,9 +17,17 @@ defmodule CashCadence.Imports.Parsers.PDF do
 
   def parse_recognized(binary, text, ocr?) do
     cond do
-      ItauStatement.recognizes?(text) -> text |> ItauStatement.parse_text() |> finish(text, ocr?)
-      ItauCard.recognizes?(text) -> parse_card(binary, text, ocr?)
-      true -> {:error, {:unknown_layout, text}}
+      ItauStatement.recognizes?(text) ->
+        text |> ItauStatement.parse_text() |> finish(text, ocr?)
+
+      NubankStatement.recognizes?(text) ->
+        text |> NubankStatement.parse_text() |> finish(text, ocr?)
+
+      ItauCard.recognizes?(text) ->
+        parse_card(binary, text, ocr?)
+
+      true ->
+        {:error, {:unknown_layout, text}}
     end
   end
 

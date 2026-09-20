@@ -48,6 +48,23 @@ defmodule CashCadence.ImportsPDFTest do
       assert Imports.count_pending() == 7
     end
 
+    test "flags lines that are already waiting in the inbox from another file" do
+      assert {:ok, first} = Imports.ingest_file(fixture("itau_extrato.pdf"))
+      assert {:ok, second} = Imports.ingest_file(fixture("itau_extrato_divergente.pdf"))
+
+      assert second.counts["new"] == 7
+      assert second.counts["duplicates"] == 0
+
+      repeated = Enum.filter(Imports.list_inbox(), &("possible_duplicate" in &1.flags))
+      assert length(repeated) == 7
+      assert Enum.all?(repeated, &(&1.batch_id == second.id))
+
+      refute Enum.any?(
+               Imports.list_inbox(),
+               &(&1.batch_id == first.id and "possible_duplicate" in &1.flags)
+             )
+    end
+
     test "reads the card statement and approves an installment with the statement month" do
       assert {:ok, batch} = Imports.ingest_file(fixture("itau_fatura.pdf"))
       assert batch.account_kind == :credit_card

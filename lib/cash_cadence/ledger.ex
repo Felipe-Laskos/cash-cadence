@@ -482,8 +482,8 @@ defmodule CashCadence.Ledger do
     Repo.one(
       from t in active_transactions(),
         where:
-          t.kind == ^kind and t.amount == ^amount and is_nil(t.external_id) and
-            t.date >= ^from_date and t.date <= ^to_date,
+          t.kind == ^kind and t.amount == ^amount and t.source != :import and
+            is_nil(t.fingerprint) and t.date >= ^from_date and t.date <= ^to_date,
         order_by: [asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id],
         limit: 1,
         preload: :category

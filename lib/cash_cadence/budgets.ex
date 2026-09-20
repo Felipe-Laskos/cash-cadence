@@ -58,11 +58,12 @@ defmodule CashCadence.Budgets do
 
   def month_panel(%Date{} = competence) do
     competence = Date.beginning_of_month(competence)
-    paid = paid_by_category(competence, :expense)
+    bills = list_recurring_bills(kind: :expense, competence: competence)
+    paid = paid_amounts(bills, competence, :expense)
 
     items =
-      Enum.map(list_recurring_bills(kind: :expense, competence: competence), fn bill ->
-        build_item(bill, paid_amount(bill, competence, paid), competence)
+      Enum.map(bills, fn bill ->
+        build_item(bill, Map.fetch!(paid, bill.id), competence)
       end)
 
     %{
@@ -78,10 +79,11 @@ defmodule CashCadence.Budgets do
 
   def expected_incomes(%Date{} = competence) do
     competence = Date.beginning_of_month(competence)
-    received = paid_by_category(competence, :income)
+    bills = list_recurring_bills(kind: :income, competence: competence)
+    received = paid_amounts(bills, competence, :income)
 
-    Enum.map(list_recurring_bills(kind: :income, competence: competence), fn bill ->
-      amount = paid_amount(bill, competence, received)
+    Enum.map(bills, fn bill ->
+      amount = Map.fetch!(received, bill.id)
 
       %{
         bill: bill,
@@ -130,10 +132,11 @@ defmodule CashCadence.Budgets do
   def find_bill_match(kind, %Decimal{} = amount, %Date{} = competence, normalized)
       when kind in [:expense, :income] do
     competence = Date.beginning_of_month(competence)
-    paid = paid_by_category(competence, kind)
+    bills = list_recurring_bills(kind: kind, competence: competence)
+    paid = paid_amounts(bills, competence, kind)
 
-    list_recurring_bills(kind: kind, competence: competence)
-    |> Enum.reject(&fully_paid?(&1, competence, paid))
+    bills
+    |> Enum.reject(&fully_paid?(&1, Map.fetch!(paid, &1.id)))
     |> Enum.flat_map(fn bill ->
       case bill_score(bill, amount, normalized || "") do
         nil -> []
@@ -164,9 +167,7 @@ defmodule CashCadence.Budgets do
 
   defp tolerance(expected), do: Decimal.mult(expected, @tolerance)
 
-  defp fully_paid?(bill, competence, paid) do
-    Decimal.compare(paid_amount(bill, competence, paid), bill.expected_amount) != :lt
-  end
+  defp fully_paid?(bill, paid), do: Decimal.compare(paid, bill.expected_amount) != :lt
 
   def plan_installments(%{number: number, of: of} = plan)
       when is_integer(number) and is_integer(of) and number < of do
@@ -276,8 +277,33 @@ defmodule CashCadence.Budgets do
     end
   end
 
-  defp paid_amount(%RecurringBill{match_text: text} = bill, competence, _paid)
+  defp paid_amounts(bills, competence, kind) do
+    by_category = paid_by_category(competence, kind)
+    shared = shared_categories(bills)
+
+    Map.new(bills, fn bill ->
+      {bill.id, paid_amount(bill, competence, by_category, shared)}
+    end)
+  end
+
+  defp shared_categories(bills) do
+    bills
+    |> Enum.frequencies_by(& &1.category_id)
+    |> Enum.filter(fn {_category_id, bills} -> bills > 1 end)
+    |> MapSet.new(fn {category_id, _bills} -> category_id end)
+  end
+
+  defp paid_amount(%RecurringBill{match_text: text} = bill, competence, by_category, shared)
        when is_binary(text) do
+    if MapSet.member?(shared, bill.category_id),
+      do: paid_by_match_text(bill, competence, text),
+      else: Map.get(by_category, bill.category_id, Money.zero())
+  end
+
+  defp paid_amount(bill, _competence, by_category, _shared),
+    do: Map.get(by_category, bill.category_id, Money.zero())
+
+  defp paid_by_match_text(bill, competence, text) do
     lower = Decimal.sub(bill.expected_amount, tolerance(bill.expected_amount))
     upper = Decimal.add(bill.expected_amount, tolerance(bill.expected_amount))
 
@@ -286,14 +312,13 @@ defmodule CashCadence.Budgets do
         from t in Transaction,
           where:
             is_nil(t.deleted_at) and t.kind == ^bill.kind and t.competence == ^competence and
+              t.category_id == ^bill.category_id and
               t.amount >= ^lower and t.amount <= ^upper and
               ilike(t.normalized_description, ^"%#{text}%"),
           select: sum(t.amount)
       )
     ])
   end
-
-  defp paid_amount(bill, _competence, paid), do: Map.get(paid, bill.category_id, Money.zero())
 
   defp paid_by_category(competence, kind) do
     Repo.all(
