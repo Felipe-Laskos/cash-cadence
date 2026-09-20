@@ -218,7 +218,7 @@ defmodule CashCadenceWeb.CoreComponents do
   attr :type, :string,
     default: "text",
     values: ~w(checkbox color date datetime-local email file month number password
-               search select tel text textarea time url week hidden)
+               search select tel text textarea time url week hidden br_date)
 
   attr :field, Phoenix.HTML.FormField,
     doc: "a form field struct retrieved from the form, for example: @form[:email]"
@@ -244,6 +244,41 @@ defmodule CashCadenceWeb.CoreComponents do
     |> assign_new(:name, fn -> if assigns.multiple, do: field.name <> "[]", else: field.name end)
     |> assign_new(:value, fn -> field.value end)
     |> input()
+  end
+
+  def input(%{type: "br_date"} = assigns) do
+    assigns = assign(assigns, :value, br_date_value(assigns[:value]))
+
+    ~H"""
+    <div class="fieldset mb-2">
+      <label for={@id}>
+        <span :if={@label} class="label mb-1">{@label}</span>
+        <input
+          type="text"
+          id={@id}
+          name={@name}
+          value={@value}
+          inputmode="numeric"
+          maxlength="10"
+          placeholder="dd/mm/aaaa"
+          phx-hook=".BrDate"
+          class={[@class || "input w-full", @errors != [] && (@error_class || "input-error")]}
+          {@rest}
+        />
+      </label>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".BrDate">
+      export default {
+        mounted() { this.el.addEventListener("input", () => this.mask()) },
+        mask() {
+          const digits = this.el.value.replace(/\D/g, "").slice(0, 8)
+          const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
+          this.el.value = parts.filter(part => part !== "").join("/")
+        }
+      }
+    </script>
+    """
   end
 
   def input(%{type: "hidden"} = assigns) do
@@ -549,4 +584,13 @@ defmodule CashCadenceWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  defp br_date_value(%Date{} = date), do: Calendar.strftime(date, "%d/%m/%Y")
+
+  defp br_date_value(
+         <<year::binary-size(4), "-", month::binary-size(2), "-", day::binary-size(2)>>
+       ),
+       do: "#{day}/#{month}/#{year}"
+
+  defp br_date_value(value), do: value
 end

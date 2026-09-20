@@ -21,6 +21,27 @@ defmodule CashCadence.Imports.BrFormat do
 
   def decimal(text) when is_binary(text), do: Money.parse(text)
 
+  def any_date(<<_::binary-size(4), "-", _::binary>> = text), do: Date.from_iso8601(text)
+  def any_date(text) when is_binary(text), do: date(text)
+  def any_date(_text), do: {:error, :invalid_date}
+
+  def normalize_param(attrs, key) when is_map(attrs) do
+    string_key = Atom.to_string(key)
+
+    cond do
+      is_binary(Map.get(attrs, string_key)) -> Map.update!(attrs, string_key, &to_iso/1)
+      is_binary(Map.get(attrs, key)) -> Map.update!(attrs, key, &to_iso/1)
+      true -> attrs
+    end
+  end
+
+  defp to_iso(text) do
+    case any_date(String.trim(text)) do
+      {:ok, date} -> Date.to_iso8601(date)
+      _error -> text
+    end
+  end
+
   def money(%Decimal{} = value) do
     rounded = Decimal.round(value, 2)
     sign = if Decimal.negative?(rounded), do: "-", else: ""

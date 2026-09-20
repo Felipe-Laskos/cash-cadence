@@ -4,6 +4,7 @@ defmodule CashCadence.Ledger.Transaction do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias CashCadence.Imports.BrFormat
   alias CashCadence.Ledger.{BankAccount, Category}
   alias CashCadence.Money
 
@@ -14,6 +15,7 @@ defmodule CashCadence.Ledger.Transaction do
     field :date, :date
     field :competence, :date
     field :kind, Ecto.Enum, values: @kinds
+    field :direction, Ecto.Enum, values: [:in, :out]
     field :amount, :decimal
     field :description, :string
     field :raw_description, :string
@@ -39,10 +41,11 @@ defmodule CashCadence.Ledger.Transaction do
 
   def changeset(transaction, attrs) do
     transaction
-    |> cast(Money.normalize_param(attrs, :amount), [
+    |> cast(attrs |> Money.normalize_param(:amount) |> BrFormat.normalize_param(:date), [
       :date,
       :competence,
       :kind,
+      :direction,
       :amount,
       :description,
       :raw_description,

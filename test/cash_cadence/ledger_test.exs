@@ -229,4 +229,16 @@ defmodule CashCadence.LedgerTest do
       assert [%{date: ~D[2026-05-14]}, %{date: ~D[2026-05-13]}] = Ledger.recent_transactions(2)
     end
   end
+
+  test "a transaction accepts a date typed the Brazilian way" do
+    assert {:ok, transaction} =
+             Ledger.create_transaction(%{
+               "date" => "10/05/2026",
+               "kind" => "expense",
+               "amount" => "12,50"
+             })
+
+    assert transaction.date == ~D[2026-05-10]
+    assert transaction.competence == ~D[2026-05-01]
+  end
 end
