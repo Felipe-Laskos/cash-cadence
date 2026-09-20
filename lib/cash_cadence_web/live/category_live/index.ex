@@ -153,6 +153,7 @@ defmodule CashCadenceWeb.CategoryLive.Index do
       current_scope={@current_scope}
       nav={:categories}
       inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
     >
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>

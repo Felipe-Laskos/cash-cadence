@@ -265,6 +265,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
       current_scope={@current_scope}
       nav={:transactions}
       inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
     >
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -334,7 +335,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           phx-submit={JS.push("save") |> JS.focus(to: "#transaction_category_name")}
           class="grid gap-2 border-b border-base-300 p-4 md:grid-cols-2 md:items-start lg:grid-cols-[9rem_10rem_1fr_1fr] xl:grid-cols-[9rem_10rem_1fr_1fr_9rem_9rem_auto]"
         >
-          <.input field={@form[:date]} type="date" required />
+          <.input field={@form[:date]} type="br_date" required />
           <.input field={@form[:kind]} type="select" options={@kinds} />
           <div>
             <.input
@@ -393,7 +394,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
           >
             <.modal_body>
               <div class="grid gap-x-4 sm:grid-cols-2">
-                <.input field={@form[:date]} type="date" label="Data" required />
+                <.input field={@form[:date]} type="br_date" label="Data" required />
                 <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
                 <div>
                   <.input

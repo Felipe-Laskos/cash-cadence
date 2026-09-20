@@ -3,9 +3,12 @@ defmodule CashCadenceWeb.InboxCount do
 
   import Phoenix.Component, only: [assign: 3]
 
-  alias CashCadence.Imports
+  alias CashCadence.{Duplicates, Imports}
 
   def on_mount(:default, _params, _session, socket) do
-    {:cont, assign(socket, :inbox_count, Imports.count_pending())}
+    {:cont,
+     socket
+     |> assign(:inbox_count, Imports.count_pending())
+     |> assign(:duplicate_count, Duplicates.count())}
   end
 end

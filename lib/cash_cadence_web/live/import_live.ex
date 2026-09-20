@@ -159,6 +159,7 @@ defmodule CashCadenceWeb.ImportLive do
       current_scope={@current_scope}
       nav={:import}
       inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
     >
       <div>
         <h1 class="text-3xl font-bold tracking-tight">Importar</h1>

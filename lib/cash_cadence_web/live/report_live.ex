@@ -112,6 +112,7 @@ defmodule CashCadenceWeb.ReportLive do
       current_scope={@current_scope}
       nav={:reports}
       inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
     >
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>

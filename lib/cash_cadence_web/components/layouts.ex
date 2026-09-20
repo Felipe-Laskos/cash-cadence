@@ -33,6 +33,7 @@ defmodule CashCadenceWeb.Layouts do
 
   attr :nav, :atom, default: nil
   attr :inbox_count, :integer, default: nil
+  attr :duplicate_count, :integer, default: nil
 
   slot :inner_block, required: true
 
@@ -75,6 +76,26 @@ defmodule CashCadenceWeb.Layouts do
           </.nav_link>
           <.nav_link navigate={~p"/fixas"} icon="hero-arrow-path" active={@nav == :bills}>Despesas fixas</.nav_link>
           <.nav_link navigate={~p"/categorias"} icon="hero-tag" active={@nav == :categories}>Categorias</.nav_link>
+          <.nav_link
+            navigate={~p"/duplicatas"}
+            icon="hero-document-duplicate"
+            active={@nav == :duplicates}
+          >
+            Duplicatas
+            <span
+              :if={@duplicate_count && @duplicate_count > 0}
+              class="badge badge-warning badge-sm ml-auto"
+            >
+              {@duplicate_count}
+            </span>
+          </.nav_link>
+          <.nav_link
+            navigate={~p"/conferencia"}
+            icon="hero-scale"
+            active={@nav == :reconciliation}
+          >
+            Conferência
+          </.nav_link>
           <.nav_link navigate={~p"/relatorios"} icon="hero-chart-bar" active={@nav == :reports}>Relatórios</.nav_link>
           <.nav_link navigate={~p"/importar"} icon="hero-arrow-up-tray" active={@nav == :import}>Importar</.nav_link>
         </nav>

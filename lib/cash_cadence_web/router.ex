@@ -53,6 +53,8 @@ defmodule CashCadenceWeb.Router do
       live "/relatorios", ReportLive, :index
       live "/importar", ImportLive, :index
       live "/entrada", InboxLive, :index
+      live "/duplicatas", DuplicateLive, :index
+      live "/conferencia", ReconciliationLive, :index
       live "/configuracoes", SettingsLive, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
