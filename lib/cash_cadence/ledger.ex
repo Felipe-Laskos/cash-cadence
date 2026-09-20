@@ -3,6 +3,9 @@ defmodule CashCadence.Ledger do
 
   import Ecto.Query, warn: false
 
+  @candidates 5
+
+  alias CashCadence.Imports.Similarity
   alias CashCadence.Ledger.{BankAccount, Category, Transaction}
   alias CashCadence.Money
   alias CashCadence.Repo
@@ -475,22 +478,29 @@ defmodule CashCadence.Ledger do
     |> Repo.all()
   end
 
-  def find_manual_match(kind, %Decimal{} = amount, %Date{} = date, window_days) do
+  def find_manual_match(kind, %Decimal{} = amount, %Date{} = date, window_days, normalized \\ nil) do
     from_date = Date.add(date, -window_days)
     to_date = Date.add(date, window_days)
 
-    Repo.one(
-      from t in active_transactions(),
-        where:
-          t.kind == ^kind and t.amount == ^amount and t.source != :import and
-            is_nil(t.fingerprint) and t.date >= ^from_date and t.date <= ^to_date,
-        order_by: [asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id],
-        limit: 1,
-        preload: :category
+    from(t in active_transactions(),
+      where:
+        t.kind == ^kind and t.amount == ^amount and t.source != :import and
+          is_nil(t.fingerprint) and t.date >= ^from_date and t.date <= ^to_date,
+      order_by: [asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id],
+      limit: @candidates,
+      preload: :category
     )
+    |> Repo.all()
+    |> Similarity.best(normalized, date)
   end
 
-  def find_transfer_counterpart(%Decimal{} = amount, %Date{} = date, account_id, window_days) do
+  def find_transfer_counterpart(
+        %Decimal{} = amount,
+        %Date{} = date,
+        account_id,
+        window_days,
+        normalized \\ nil
+      ) do
     from_date = Date.add(date, -window_days)
     to_date = Date.add(date, window_days)
 
@@ -498,9 +508,10 @@ defmodule CashCadence.Ledger do
     |> where([t], t.amount == ^amount and t.date >= ^from_date and t.date <= ^to_date)
     |> counterpart_scope(account_id)
     |> order_by([t], asc: fragment("abs(? - ?)", t.date, type(^date, :date)), asc: t.id)
-    |> limit(1)
+    |> limit(@candidates)
     |> preload(:category)
-    |> Repo.one()
+    |> Repo.all()
+    |> Similarity.best(normalized, date)
   end
 
   defp counterpart_scope(query, nil), do: where(query, [t], t.kind == :transfer)
