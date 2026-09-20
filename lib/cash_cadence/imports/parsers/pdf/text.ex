@@ -34,13 +34,16 @@ defmodule CashCadence.Imports.Parsers.PDF.Text do
     cond do
       encrypted?(binary) -> {:error, :encrypted}
       not available?() -> {:error, :pdftotext_missing}
-      true -> with_temp_files(binary, ".pdf", fn input, _output -> run(input, opts[:crop]) end)
+      true -> with_temp_files(binary, ".pdf", fn input, _output -> run(input, opts) end)
     end
   end
 
-  defp run(path, crop) do
+  defp run(path, opts) do
     exe = System.find_executable("pdftotext")
-    args = ["-q", "-layout", "-enc", "UTF-8"] ++ crop_args(crop) ++ [path, "-"]
+
+    args =
+      ["-q", layout_arg(opts[:mode]), "-enc", "UTF-8"] ++ crop_args(opts[:crop]) ++ [path, "-"]
+
     task = Task.async(fn -> System.cmd(exe, args) end)
 
     case Task.yield(task, @timeout) || Task.shutdown(task, :brutal_kill) do
@@ -49,6 +52,9 @@ defmodule CashCadence.Imports.Parsers.PDF.Text do
       nil -> {:error, :timeout}
     end
   end
+
+  defp layout_arg(:raw), do: "-raw"
+  defp layout_arg(_mode), do: "-layout"
 
   defp crop_args(nil), do: []
 

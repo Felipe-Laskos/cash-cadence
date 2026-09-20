@@ -4,7 +4,7 @@ defmodule CashCadence.Imports do
   import Ecto.Query, warn: false
 
   alias CashCadence.{Budgets, Classifier, Settings}
-  alias CashCadence.Imports.{Batch, InboxItem, Normalizer, Sniffer}
+  alias CashCadence.Imports.{Batch, BrFormat, InboxItem, Normalizer, Sniffer}
   alias CashCadence.Ledger
   alias CashCadence.Ledger.{BankAccount, Transaction}
   alias CashCadence.Repo
@@ -42,7 +42,9 @@ defmodule CashCadence.Imports do
             period_end: parsed.period_end,
             statement_balance: parsed.balance,
             raw_text: parsed[:raw_text],
-            warnings: parsed[:warnings] || [],
+            warnings:
+              (parsed[:warnings] || []) ++
+                overlap_warnings(account, parsed.period_start, parsed.period_end),
             bank_account_id: account && account.id
           })
           |> Repo.insert!()
@@ -65,6 +67,30 @@ defmodule CashCadence.Imports do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp overlap_warnings(%BankAccount{} = account, %Date{} = period_start, %Date{} = period_end) do
+    from(b in Batch,
+      where:
+        b.bank_account_id == ^account.id and not is_nil(b.period_start) and
+          not is_nil(b.period_end) and b.period_start <= ^period_end and
+          b.period_end >= ^period_start,
+      order_by: [asc: b.id]
+    )
+    |> Repo.all()
+    |> Enum.map(&overlap_warning(&1, period_start, period_end))
+  end
+
+  defp overlap_warnings(_account, _period_start, _period_end), do: []
+
+  defp overlap_warning(%Batch{} = batch, period_start, period_end) do
+    from_date = Enum.max([batch.period_start, period_start], Date)
+    to_date = Enum.min([batch.period_end, period_end], Date)
+
+    "O período de #{format_date(from_date)} a #{format_date(to_date)} já veio no arquivo " <>
+      "#{batch.file_name}: confira os lançamentos desse intervalo antes de aprovar."
+  end
+
+  defp format_date(%Date{} = date), do: Calendar.strftime(date, "%d/%m/%Y")
 
   defp maybe_auto_approve({:ok, batch}) do
     if Settings.auto_approve?() do
@@ -125,7 +151,7 @@ defmodule CashCadence.Imports do
   defp build_item(raw, batch, account, statement_competence) do
     account_id = id_of(account)
     normalized = Normalizer.normalize(raw.raw_description)
-    fingerprint = fingerprint(account_id, raw.date, raw.amount, normalized)
+    fingerprint = fingerprint(account_id, raw.date, raw.amount, fingerprint_text(normalized, raw))
     classification = classify(raw, normalized)
 
     raw = %{
@@ -169,7 +195,8 @@ defmodule CashCadence.Imports do
           known_fingerprint?(fingerprint, batch.id),
           suggestion.category_id,
           kind,
-          reimbursement
+          reimbursement,
+          settled?(raw, counterpart)
         ),
       payload:
         raw.payload
@@ -308,9 +335,25 @@ defmodule CashCadence.Imports do
     if is_nil(category_id) and kind != :transfer, do: flags ++ ["uncategorized"], else: flags
   end
 
+  defp fingerprint_text(normalized, %{
+         payload: %{"installment" => %{"number" => number, "of" => of}}
+       }),
+       do: "#{normalized} #{number}/#{of}"
+
+  defp fingerprint_text(normalized, _raw), do: normalized
+
+  defp transfer_link(%{payload: %{"section" => "purchases"}} = raw, _account_id),
+    do: {raw.kind, nil, nil}
+
   defp transfer_link(raw, account_id) do
     counterpart =
-      Ledger.find_transfer_counterpart(raw.amount, raw.date, account_id, @transfer_window_days)
+      Ledger.find_transfer_counterpart(
+        raw.amount,
+        raw.date,
+        account_id,
+        @transfer_window_days,
+        Normalizer.normalize(raw.raw_description)
+      )
 
     counterpart_item = if is_nil(counterpart), do: find_pending_counterpart(raw, account_id)
     kind = if counterpart || counterpart_item, do: :transfer, else: raw.kind
@@ -351,8 +394,15 @@ defmodule CashCadence.Imports do
 
   defp find_match(%{kind: :transfer}), do: nil
 
-  defp find_match(raw),
-    do: Ledger.find_manual_match(raw.kind, raw.amount, raw.date, @match_window_days)
+  defp find_match(raw) do
+    Ledger.find_manual_match(
+      raw.kind,
+      raw.amount,
+      raw.date,
+      @match_window_days,
+      Normalizer.normalize(raw.raw_description)
+    )
+  end
 
   defp known_fingerprint?(fingerprint, batch_id) do
     Repo.exists?(
@@ -365,12 +415,24 @@ defmodule CashCadence.Imports do
       )
   end
 
-  defp flags(match, transfer?, possible_duplicate?, suggested_category_id, kind, reimbursement) do
+  defp settled?(%{payload: %{"section" => "payments"}}, counterpart), do: not is_nil(counterpart)
+  defp settled?(_raw, _counterpart), do: false
+
+  defp flags(
+         match,
+         transfer?,
+         possible_duplicate?,
+         suggested_category_id,
+         kind,
+         reimbursement,
+         settled?
+       ) do
     [
       {match != nil, "match"},
       {transfer?, "transfer"},
       {reimbursement != nil, "reimbursement"},
       {possible_duplicate?, "possible_duplicate"},
+      {settled?, "settled"},
       {is_nil(suggested_category_id) and kind != :transfer, "uncategorized"}
     ]
     |> Enum.filter(&elem(&1, 0))
@@ -425,6 +487,17 @@ defmodule CashCadence.Imports do
   end
 
   def get_batch!(id), do: Batch |> preload(:bank_account) |> Repo.get!(id)
+
+  def pending_batches do
+    Repo.all(
+      from i in InboxItem,
+        join: b in assoc(i, :batch),
+        where: i.status == :pending,
+        group_by: [b.id, b.file_name],
+        order_by: [desc: b.id],
+        select: %{id: b.id, file_name: b.file_name, count: count(i.id)}
+    )
+  end
 
   def list_inbox(filters \\ %{}) do
     InboxItem
@@ -483,6 +556,8 @@ defmodule CashCadence.Imports do
         }
         |> maybe_put_category(attrs)
         |> maybe_put_reimbursement(attrs, item)
+        |> drop_category_on_transfer()
+        |> put_direction(item)
 
       case Ledger.create_transaction(transaction_attrs) do
         {:ok, transaction} ->
@@ -568,7 +643,7 @@ defmodule CashCadence.Imports do
 
   defp approved_date(value, item) do
     with true <- is_binary(value) and String.trim(value) != "",
-         {:ok, date} <- Date.from_iso8601(String.trim(value)),
+         {:ok, date} <- BrFormat.any_date(String.trim(value)),
          true <- date != item.date do
       {date, Date.beginning_of_month(date)}
     else
@@ -591,6 +666,22 @@ defmodule CashCadence.Imports do
   end
 
   defp maybe_put_category(transaction_attrs, _attrs), do: transaction_attrs
+
+  defp drop_category_on_transfer(%{"kind" => kind} = attrs) when kind in ["transfer", :transfer],
+    do: attrs |> Map.put("category_id", nil) |> Map.delete("category_name")
+
+  defp drop_category_on_transfer(attrs), do: attrs
+
+  defp put_direction(%{"kind" => kind} = attrs, %InboxItem{payload: payload})
+       when kind in ["transfer", :transfer] do
+    case payload["signed_amount"] do
+      "-" <> _rest -> Map.put(attrs, "direction", :out)
+      signed when is_binary(signed) -> Map.put(attrs, "direction", :in)
+      _other -> attrs
+    end
+  end
+
+  defp put_direction(attrs, _item), do: attrs
 
   def merge(%InboxItem{status: :pending} = item, %Transaction{} = transaction) do
     Repo.transaction(fn ->

@@ -8,17 +8,22 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
   @payments_anchor "Pagamentos efetuados"
   @purchases_total ~r/Total dos lançamentos atuais\s+(-?[\d.]*\d,\d{2})/u
   @payments_total ~r/Total dos pagamentos\s+(-?[\d.]*\d,\d{2})/u
-  @line ~r/^\s*(\d{2}\/\d{2})\s+(.+?)\s{2,}(-?[\d.]*\d,\d{2})(?:\s{2,}.*)?$/
+  @line ~r/^\s*(\d{2}\/\d{2})\s+(.+?)\s+(-?[\d.]*\d,\d{2})(?:\s+\D.*)?$/
   @installment ~r/^(.*?)\s+(\d{2})\/(\d{2})$/
   @hint ~r/^\s*(\p{Ll}\S*(?:\s\p{Ll}\S*)*)(?:\s+(\S.*?))?\s*$/u
   @issued ~r/Emissão:\s*(\d{2}\/\d{2}\/\d{4})/u
   @due ~r/Vencimento:\s*(\d{2}\/\d{2}\/\d{4})/u
   @total ~r/O total da sua fatura é:[^\n]*\n\s*R\$\s*(-?[\d.]*\d,\d{2})/u
+  @previous ~r/Total da fatura anterior\s+(-?[\d.]*\d,\d{2})/u
   @card ~r/Cartão\s+([\dX]{4}(?:\.[\dX]{4}){3})/u
 
   def recognizes?(text) when is_binary(text) do
-    String.contains?(text, @purchases_anchor) and Regex.match?(@purchases_total, text)
+    anchor?(text, @purchases_anchor) and Regex.match?(@purchases_total, text)
   end
+
+  defp anchor?(text, anchor), do: String.contains?(despace(text), despace(anchor))
+
+  defp despace(text), do: String.replace(text, " ", "")
 
   def parse_text(text) when is_binary(text) do
     with {:ok, issued} <- issued_on(text) do
@@ -47,7 +52,8 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
                  "dos pagamentos lidos",
                  payments,
                  printed_amount(text, @payments_total)
-               )
+               ) ++
+               settlement_warning(payments, printed_amount(text, @previous))
          }}
       end
     end
@@ -69,8 +75,8 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
 
   defp step(line, {state, acc}, issued) do
     cond do
-      String.contains?(line, @payments_anchor) -> {:payments, acc}
-      String.contains?(line, @purchases_anchor) -> {:purchases, acc}
+      anchor?(line, @payments_anchor) -> {:payments, acc}
+      anchor?(line, @purchases_anchor) -> {:purchases, acc}
       total_line?(line) -> {:outside, acc}
       state == :outside -> {state, acc}
       true -> {state, collect(state, line, acc, issued)}
@@ -108,7 +114,7 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
         %{acc | purchases: [%{last | hint: %{category: category, city: nil}} | rest]}
 
       [_, category, city] ->
-        %{acc | purchases: [%{last | hint: %{category: category, city: city}} | rest]}
+        %{acc | purchases: [%{last | hint: %{category: category, city: city_of(city)}} | rest]}
 
       nil ->
         acc
@@ -116,6 +122,17 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
   end
 
   defp attach_hint(_state, acc, _line), do: acc
+
+  defp city_of(text) do
+    text
+    |> String.split(~r/\s+/)
+    |> Enum.take_while(&(&1 == String.upcase(&1) and Regex.match?(~r/^\p{Lu}/u, &1)))
+    |> Enum.join(" ")
+    |> case do
+      "" -> nil
+      city -> city
+    end
+  end
 
   defp purchase_raw(%{date: date, label: label, signed: signed, hint: hint}, issued) do
     {name, installment} = split_installment(label)
@@ -173,6 +190,23 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauCard do
 
   defp put_installment(payload, %{number: number, of: of}),
     do: Map.put(payload, "installment", %{"number" => number, "of" => of})
+
+  defp settlement_warning(_payments, nil), do: []
+
+  defp settlement_warning(payments, previous) do
+    paid = payments |> Enum.map(& &1.signed) |> Money.sum() |> Decimal.abs()
+    previous = Decimal.abs(previous)
+
+    if Decimal.equal?(paid, previous) or Decimal.equal?(previous, Money.zero()) do
+      []
+    else
+      [
+        "A fatura anterior era de #{BrFormat.money(previous)} e o pagamento registrado foi de " <>
+          "#{BrFormat.money(paid)}: a diferença de #{BrFormat.money(Decimal.sub(previous, paid))} " <>
+          "fica como saldo e rende juros."
+      ]
+    end
+  end
 
   defp total_warning(_label, _entries, nil), do: []
 

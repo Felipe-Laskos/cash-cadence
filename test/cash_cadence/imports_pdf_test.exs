@@ -48,6 +48,19 @@ defmodule CashCadence.ImportsPDFTest do
       assert Imports.count_pending() == 7
     end
 
+    test "warns when the file covers a period already imported for the account" do
+      bank_account_fixture(%{name: "Itaú conta", bank: :itau, kind: :checking})
+
+      assert {:ok, first} = Imports.ingest_file(fixture("itau_extrato.pdf"))
+      assert {:ok, second} = Imports.ingest_file(fixture("itau_extrato_divergente.pdf"))
+
+      refute Enum.any?(first.warnings, &(&1 =~ "já veio no arquivo"))
+
+      assert warning = Enum.find(second.warnings, &(&1 =~ "já veio no arquivo"))
+      assert warning =~ "01/05/2026 a 31/05/2026"
+      assert warning =~ first.file_name
+    end
+
     test "flags lines that are already waiting in the inbox from another file" do
       assert {:ok, first} = Imports.ingest_file(fixture("itau_extrato.pdf"))
       assert {:ok, second} = Imports.ingest_file(fixture("itau_extrato_divergente.pdf"))
@@ -80,6 +93,51 @@ defmodule CashCadence.ImportsPDFTest do
       assert transaction.competence == ~D[2026-05-01]
       assert transaction.date == ~D[2026-03-16]
       assert transaction.source == :import
+    end
+
+    test "a purchase is not turned into a transfer when the invoice payment has the same amount" do
+      checking = bank_account_fixture(%{name: "Conta", bank: :itau, kind: :checking})
+      bank_account_fixture(%{name: "Cartão", bank: :itau, kind: :credit_card})
+
+      payment =
+        transaction_fixture(%{
+          date: ~D[2026-05-06],
+          kind: :transfer,
+          amount: "150.00",
+          bank_account_id: checking.id
+        })
+
+      assert {:ok, _batch} = Imports.ingest_file(fixture("itau_fatura.pdf"))
+
+      items = Imports.list_inbox()
+      purchase = Enum.find(items, &(&1.raw_description =~ "ASSINATURAEXEMPLO"))
+      invoice_payment = Enum.find(items, &(&1.description == "Pagamento da fatura"))
+
+      assert purchase.kind == :expense
+      refute "transfer" in purchase.flags
+      assert invoice_payment.kind == :transfer
+      assert invoice_payment.counterpart_transaction_id == payment.id
+      assert "settled" in invoice_payment.flags
+      refute "settled" in purchase.flags
+    end
+
+    test "installments of the same purchase are not read as duplicates of each other" do
+      card = bank_account_fixture(%{name: "Cartão", bank: :itau, kind: :credit_card})
+
+      transaction_fixture(%{
+        date: ~D[2026-03-16],
+        kind: :expense,
+        amount: "208.00",
+        bank_account_id: card.id,
+        normalized_description: "OFICINAEXEMPLO",
+        fingerprint:
+          Imports.fingerprint(card.id, ~D[2026-03-16], Decimal.new("208.00"), "OFICINAEXEMPLO")
+      })
+
+      assert {:ok, _batch} = Imports.ingest_file(fixture("itau_fatura.pdf"))
+
+      workshop = Enum.find(Imports.list_inbox(), &(&1.description == "OficinaExemplo (3/3)"))
+      refute "possible_duplicate" in workshop.flags
     end
 
     test "rejects PDFs it does not know without creating a batch" do

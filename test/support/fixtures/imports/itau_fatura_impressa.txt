@@ -1,0 +1,29 @@
+Platinum
+CLIENTE EXEMPLO
+RUA EXEMPLO, 100
+00000-000 CIDADE EXEMPLO PR
+Total da fatura anterior 180,00
+Pagamento efetuado em 06/07/2026 -180,00
+S Saldo financiado 0,00
+L Lançamentos atuais 300,00
+Postagem: 30/07/2026
+Vencimento: 06/08/2026 = Total desta fatura 300,00
+Emissão: 30/07/2026
+Previsão próx. Fechamento: 30/08/2026
+Cartão 1234.XXXX.XXXX.5678
+Pa ga me nt os e fet u ad o s Enca rg o s cob ra do s nes ta fat u ra
+DATA VALOR EM R$ Juros do rotativo 15,10 % 0,00
+06/07 Pagamento via conta -180,00 Juros de mora 1,00 % am 0,00
+P Total dos pagamentos -180,00 Multa por atraso 2,00 % 0,00
+La nça me nt os : co m pr as e sa qu es
+DATA ESTABELECIMENTO VALOR EM R$ Valor em R$
+16/06 LojaExemplo 02/03 120,00
+serviços CIDADE EXEMPLO
+07/07 ASSINATURAEXEMPLO 180,00
+serviços OUTRA CIDADE Juros e enca rgos finance iros até o momento 0,00
+L Total dos lançamentos atuais 300,00
+C om pra s par cel ad as - pró x im as fa tur as
+DATA ESTABELECIMENTO VALOR EM R$
+16/06 LojaExemplo 03/03 120,00
+Próxima fatura 120,00
+Total para próximas faturas 120,00

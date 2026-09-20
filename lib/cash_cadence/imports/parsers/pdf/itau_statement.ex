@@ -27,13 +27,16 @@ defmodule CashCadence.Imports.Parsers.PDF.ItauStatement do
     if transactions == [] do
       {:error, :no_transactions}
     else
+      period_end = period(text, 2) || max_date(transactions)
+      balances = Enum.filter(balances, &(Date.compare(&1.date, period_end) != :gt))
+
       {:ok,
        %{
          bank: :itau,
          account: %{bank_id: "341", account_ref: account_ref(text), kind: :checking},
          currency: "BRL",
          period_start: period(text, 1) || min_date(transactions),
-         period_end: period(text, 2) || max_date(transactions),
+         period_end: period_end,
          balance: balances |> List.last() |> then(&(&1 && &1.amount)),
          transactions: Enum.map(transactions, &to_raw/1),
          warnings:

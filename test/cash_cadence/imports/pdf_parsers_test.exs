@@ -3,7 +3,7 @@ defmodule CashCadence.Imports.PDFParsersTest do
 
   alias CashCadence.Imports.{BrFormat, Sniffer}
   alias CashCadence.Imports.Parsers
-  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement, NubankStatement}
+  alias CashCadence.Imports.Parsers.PDF.{ItauCard, ItauStatement, NubankStatement, Text}
 
   @fixtures Path.expand("../../support/fixtures/imports", __DIR__)
 
@@ -17,6 +17,22 @@ defmodule CashCadence.Imports.PDFParsersTest do
   end
 
   describe "BrFormat" do
+    test "reads a date written the Brazilian way or in ISO" do
+      assert BrFormat.any_date("10/05/2026") == {:ok, ~D[2026-05-10]}
+      assert BrFormat.any_date("2026-05-10") == {:ok, ~D[2026-05-10]}
+      assert BrFormat.any_date("31/02/2026") == {:error, :invalid_date}
+      assert BrFormat.any_date("qualquer coisa") == {:error, :invalid_date}
+    end
+
+    test "normalizes a typed date before it reaches the changeset" do
+      assert BrFormat.normalize_param(%{"date" => "10/05/2026"}, :date) == %{
+               "date" => "2026-05-10"
+             }
+
+      assert BrFormat.normalize_param(%{date: "2026-05-10"}, :date) == %{date: "2026-05-10"}
+      assert BrFormat.normalize_param(%{"date" => "nada"}, :date) == %{"date" => "nada"}
+    end
+
     test "resolves dd/mm against a reference date, rolling back a year when needed" do
       assert BrFormat.day_month("05/09", ~D[2026-09-08]) == {:ok, ~D[2026-09-05]}
       assert BrFormat.day_month("28/12", ~D[2027-01-30]) == {:ok, ~D[2026-12-28]}
@@ -65,6 +81,20 @@ defmodule CashCadence.Imports.PDFParsersTest do
       assert fuel.date == ~D[2026-05-05]
       assert market.date == ~D[2026-05-04]
       assert Decimal.equal?(market.amount, Decimal.new("82.50"))
+    end
+
+    test "keeps the balance of the period even when the file shows a later one" do
+      text =
+        String.replace(
+          fixture("itau_extrato.txt"),
+          "Aviso!",
+          "15/09/2026       SALDO DO DIA                                                         9.999,99\nAviso!"
+        )
+
+      assert {:ok, parsed} = ItauStatement.parse_text(text)
+      assert parsed.period_end == ~D[2026-05-31]
+      assert Decimal.equal?(parsed.balance, Decimal.new("1180.50"))
+      assert parsed.warnings == []
     end
 
     test "flags days whose balance does not match the movements and unknown dated lines" do
@@ -172,6 +202,21 @@ defmodule CashCadence.Imports.PDFParsersTest do
     end
   end
 
+  describe "Text.extract/2" do
+    @describetag :pdftotext
+
+    test "reads the same file in raw mode, which keeps words the layout mode splits" do
+      binary = fixture("itau_extrato.pdf")
+
+      assert {:ok, layout} = Text.extract(binary)
+      assert {:ok, raw} = Text.extract(binary, mode: :raw)
+
+      assert layout =~ "SALDO DO DIA"
+      assert raw =~ "SALDO DO DIA"
+      refute layout == raw
+    end
+  end
+
   describe "NubankStatement.parse_text/1" do
     test "reads the day sections, joins wrapped descriptions and validates the balance chain" do
       text = fixture("nubank_extrato.txt")
@@ -229,6 +274,55 @@ defmodule CashCadence.Imports.PDFParsersTest do
       assert broken_day =~ "o extrato mostra R$ 1.600,00"
       assert broken_day =~ "diferença de R$ 100,00"
       assert next_day =~ "Saldo de 05/06/2026 não bate"
+    end
+  end
+
+  describe "ItauCard.parse_text/1 with the printed invoice layout" do
+    test "reads it despite the letter spacing and skips the next-invoice section" do
+      text = fixture("itau_fatura_impressa.txt")
+      assert ItauCard.recognizes?(text)
+      assert {:ok, parsed} = ItauCard.parse_text(text)
+
+      assert parsed.account == %{
+               bank_id: "341",
+               account_ref: "1234.XXXX.XXXX.5678",
+               kind: :credit_card
+             }
+
+      assert parsed.due_on == ~D[2026-08-06]
+      assert Decimal.equal?(parsed.balance, Decimal.new("300.00"))
+      assert parsed.warnings == []
+
+      [payment, store, subscription] = parsed.transactions
+
+      assert payment.kind == :transfer
+      assert payment.description == "Pagamento da fatura"
+      assert Decimal.equal?(payment.amount, Decimal.new("180.00"))
+
+      assert store.description == "LojaExemplo (2/3)"
+      assert store.payload["installment"] == %{"number" => 2, "of" => 3}
+      assert store.payload["city"] == "CIDADE EXEMPLO"
+
+      assert subscription.description == "ASSINATURAEXEMPLO"
+      assert subscription.payload["city"] == "OUTRA CIDADE"
+
+      refute Enum.any?(parsed.transactions, &(&1.description =~ "(3/3)"))
+    end
+
+    test "warns when the payment did not cover the previous invoice" do
+      text =
+        fixture("itau_fatura_impressa.txt")
+        |> String.replace(
+          "06/07 Pagamento via conta -180,00",
+          "06/07 Pagamento via conta -100,00"
+        )
+        |> String.replace("P Total dos pagamentos -180,00", "P Total dos pagamentos -100,00")
+
+      assert {:ok, parsed} = ItauCard.parse_text(text)
+      assert [warning] = parsed.warnings
+      assert warning =~ "A fatura anterior era de R$ 180,00"
+      assert warning =~ "pagamento registrado foi de R$ 100,00"
+      assert warning =~ "R$ 80,00"
     end
   end
 end

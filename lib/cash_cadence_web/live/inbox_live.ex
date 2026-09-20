@@ -27,10 +27,16 @@ defmodule CashCadenceWeb.InboxLive do
       count: length(items),
       confident: Enum.count(items, &(&1.confidence == :high and &1.flags == [])),
       suggestions: Ledger.category_suggestions(),
-      inbox_count: Imports.count_pending()
+      inbox_count: Imports.count_pending(),
+      batches: Imports.pending_batches()
     )
     |> stream(:items, items, reset: true)
   end
+
+  defp other_competence?(%{competence: %Date{} = competence, date: %Date{} = date}),
+    do: competence.year != date.year or competence.month != date.month
+
+  defp other_competence?(_item), do: false
 
   defp counterpart_noun(:income), do: "receita"
   defp counterpart_noun(_kind), do: "despesa"
@@ -161,7 +167,13 @@ defmodule CashCadenceWeb.InboxLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope} nav={:inbox} inbox_count={@inbox_count}>
+    <Layouts.app
+      flash={@flash}
+      current_scope={@current_scope}
+      nav={:inbox}
+      inbox_count={@inbox_count}
+      duplicate_count={@duplicate_count}
+    >
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 class="text-3xl font-bold tracking-tight">Caixa de entrada</h1>
@@ -216,6 +228,19 @@ defmodule CashCadenceWeb.InboxLive do
         </div>
       </details>
 
+      <div :if={length(@batches) > 1} class="flex flex-wrap items-center gap-2">
+        <span class="text-base-content/60 text-sm">Revisar um arquivo por vez:</span>
+        <.link
+          :for={entry <- @batches}
+          patch={~p"/entrada?#{%{"batch" => entry.id}}"}
+          class={["btn btn-xs", @batch && @batch.id == entry.id && "btn-primary"]}
+        >
+          <span class="max-w-52 truncate font-mono">{entry.file_name}</span>
+          <span class="badge badge-ghost badge-xs">{entry.count}</span>
+        </.link>
+        <.link :if={@batch} patch={~p"/entrada"} class="btn btn-ghost btn-xs">Todos</.link>
+      </div>
+
       <div id="inbox" phx-update="stream" class="space-y-3">
         <div id="inbox-empty" class="hidden only:block">
           <.empty_state icon="hero-inbox">
@@ -234,6 +259,7 @@ defmodule CashCadenceWeb.InboxLive do
           <form
             id={"#{dom_id}-form"}
             phx-submit="approve"
+            phx-hook=".TransferCategory"
             class="card-body gap-3 p-4 lg:grid lg:grid-cols-[12rem_1fr_9rem_auto] lg:items-center"
           >
             <input type="hidden" name="item_id" value={item.id} />
@@ -242,6 +268,9 @@ defmodule CashCadenceWeb.InboxLive do
                 <.icon name="hero-building-library-micro" class="size-3" /> {source_label(item)}
               </.badge>
               <div class="font-mono">{full_date(item.posted_on || item.date)}</div>
+              <div :if={other_competence?(item)} class="text-base-content/50">
+                competência {month_label(item.competence)}
+              </div>
             </div>
 
             <div class="min-w-0 space-y-2">
@@ -277,10 +306,15 @@ defmodule CashCadenceWeb.InboxLive do
                   class="input input-sm w-56"
                 />
                 <input
-                  type="date"
+                  type="text"
                   name="item[date]"
-                  value={Date.to_iso8601(item.date)}
-                  class="input input-sm w-36"
+                  value={full_date(item.date)}
+                  inputmode="numeric"
+                  maxlength="10"
+                  placeholder="dd/mm/aaaa"
+                  phx-hook=".BrDate"
+                  id={"#{dom_id}-date"}
+                  class="input input-sm w-32 font-mono"
                   aria-label="Data"
                 />
                 <input
@@ -322,10 +356,24 @@ defmodule CashCadenceWeb.InboxLive do
                 <span>
                   Você já lançou à mão <b>{(item.match_transaction.category && item.match_transaction.category.name) || item.match_transaction.description || "sem categoria"} · {brl(item.match_transaction.amount)} em {short_date(item.match_transaction.date)}</b>.
                   Conciliar só anexa os dados do banco a esse lançamento.
+                  <b :if={item.match_transaction.competence != item.competence}>
+                    Mas aquele lançamento está na competência de {month_label(
+                      item.match_transaction.competence
+                    )} e este é de {month_label(item.competence)}: se forem meses diferentes de
+                    verdade, aprove como novo em vez de conciliar.
+                  </b>
+                </span>
+              </div>
+              <div :if={"settled" in item.flags} class="alert alert-info alert-soft py-2 text-sm">
+                <.icon name="hero-check-circle-micro" class="size-4" />
+                <span>
+                  Este pagamento de fatura já está no livro pelo extrato da conta. Ignorar deixa o
+                  livro mais enxuto; aprovar registra a contraparte no cartão, sem mexer em nenhum
+                  total.
                 </span>
               </div>
               <div
-                :if={item.counterpart_transaction}
+                :if={item.counterpart_transaction && "settled" not in item.flags}
                 class="alert alert-warning alert-soft py-2 text-sm"
               >
                 <.icon name="hero-arrow-path-micro" class="size-4" />
@@ -409,6 +457,10 @@ defmodule CashCadenceWeb.InboxLive do
               </button>
               <button
                 type="submit"
+                data-confirm={
+                  "possible_duplicate" in item.flags &&
+                    "Já existe um lançamento com mesma data, valor e descrição. Aprovar mesmo assim?"
+                }
                 class={[
                   "btn btn-sm",
                   item.match_transaction && "btn-ghost",
@@ -427,6 +479,31 @@ defmodule CashCadenceWeb.InboxLive do
               >Ignorar</button>
             </div>
           </form>
+          <script :type={Phoenix.LiveView.ColocatedHook} name=".BrDate">
+            export default {
+              mounted() { this.el.addEventListener("input", () => this.mask()) },
+              mask() {
+                const digits = this.el.value.replace(/\D/g, "").slice(0, 8)
+                const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)]
+                this.el.value = parts.filter(part => part !== "").join("/")
+              }
+            }
+          </script>
+          <script :type={Phoenix.LiveView.ColocatedHook} name=".TransferCategory">
+            export default {
+              mounted() { this.sync(); this.el.addEventListener("change", () => this.sync()) },
+              updated() { this.sync() },
+              sync() {
+                const kind = this.el.querySelector("select[name='item[kind]']")
+                const category = this.el.querySelector("input[name='item[category_name]']")
+                if (!kind || !category) return
+                const transfer = kind.value === "transfer"
+                category.disabled = transfer
+                category.placeholder = transfer ? "transferência não tem categoria" : "Categoria"
+                if (transfer) category.value = ""
+              }
+            }
+          </script>
         </article>
       </div>
 

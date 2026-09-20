@@ -70,6 +70,23 @@ defmodule CashCadence.ImportsTest do
       assert csv_batch.bank_account_id == account.id
     end
 
+    test "picks the manual entry whose description looks like the bank line" do
+      transaction_fixture(%{date: ~D[2026-05-22], amount: "48.82", description: "Outra coisa"})
+
+      bakery =
+        transaction_fixture(%{
+          date: ~D[2026-05-24],
+          amount: "48.82",
+          description: "Padaria",
+          normalized_description: "PADARIA EXEMPLO"
+        })
+
+      assert {:ok, _batch} = Imports.ingest_file(fixture("nubank_conta.ofx"))
+
+      [item | _] = Imports.list_inbox()
+      assert item.match_transaction_id == bakery.id
+    end
+
     test "offers reconciliation for a row that came from the spreadsheet" do
       sheet =
         transaction_fixture(%{
@@ -178,6 +195,14 @@ defmodule CashCadence.ImportsTest do
         )
 
       %{item: item, counterpart: counterpart}
+    end
+
+    test "a transfer never keeps a category, even when one is typed", %{item: item} do
+      assert {:ok, transaction} =
+               Imports.approve(item, %{"kind" => "transfer", "category_name" => "Salário"})
+
+      assert transaction.kind == :transfer
+      assert transaction.category_id == nil
     end
 
     test "flips the approved side when asked", %{item: item, counterpart: counterpart} do
