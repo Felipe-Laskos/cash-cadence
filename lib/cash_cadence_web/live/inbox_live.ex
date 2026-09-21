@@ -26,7 +26,7 @@ defmodule CashCadenceWeb.InboxLive do
     |> assign(
       count: length(items),
       confident: Enum.count(items, &(&1.confidence == :high and &1.flags == [])),
-      suggestions: Ledger.category_suggestions(),
+      category_options: category_options(Ledger.category_suggestions()),
       inbox_count: Imports.count_pending(),
       batches: Imports.pending_batches()
     )
@@ -287,16 +287,14 @@ defmodule CashCadenceWeb.InboxLive do
                     {label}
                   </option>
                 </select>
-                <input
-                  type="text"
+                <.combobox
                   name="item[category_name]"
                   value={category_default(item)}
                   id={"#{dom_id}-category"}
-                  list="inbox-category-options"
-                  phx-hook="Typeahead"
-                  autocomplete="off"
+                  options={@category_options}
                   placeholder="Categoria"
                   class="input input-sm w-44"
+                  wrapper_class={nil}
                 />
                 <input
                   type="text"
@@ -506,12 +504,6 @@ defmodule CashCadenceWeb.InboxLive do
           </script>
         </article>
       </div>
-
-      <datalist id="inbox-category-options">
-        <option :for={suggestion <- @suggestions} value={suggestion.name}>
-          {suggestion.uses} usos
-        </option>
-      </datalist>
     </Layouts.app>
     """
   end

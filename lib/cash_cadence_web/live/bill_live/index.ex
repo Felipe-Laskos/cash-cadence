@@ -44,7 +44,7 @@ defmodule CashCadenceWeb.BillLive.Index do
       panel: coverage.panel,
       incomes: Budgets.expected_incomes(month),
       adherence: Budgets.adherence(month, 3),
-      suggestions: Ledger.category_suggestions()
+      category_options: category_options(Ledger.category_suggestions())
     )
   end
 
@@ -455,22 +455,12 @@ defmodule CashCadenceWeb.BillLive.Index do
                 />
               </div>
               <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
-              <div>
-                <.input
-                  field={@form[:category_name]}
-                  type="text"
-                  label="Categoria vinculada"
-                  list="bill-category-options"
-                  phx-hook="Typeahead"
-                  autocomplete="off"
-                  placeholder="Categoria"
-                />
-                <datalist id="bill-category-options">
-                  <option :for={suggestion <- @suggestions} value={suggestion.name}>
-                    {suggestion.uses} usos
-                  </option>
-                </datalist>
-              </div>
+              <.combobox
+                field={@form[:category_name]}
+                label="Categoria vinculada"
+                options={@category_options}
+                placeholder="Categoria"
+              />
               <.input
                 field={@form[:expected_amount]}
                 type="text"

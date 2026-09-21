@@ -156,7 +156,7 @@ defmodule CashCadenceWeb.InboxLiveTest do
     assert Imports.count_pending() == 3
   end
 
-  test "wires the item category field to the suggestion typeahead", %{conn: conn} do
+  test "wires the item category field to the suggestion combobox", %{conn: conn} do
     category_fixture(%{name: "Comida"})
     {:ok, _batch} = Imports.ingest_file(Path.join(@fixtures, "nubank_conta.ofx"))
 
@@ -165,11 +165,10 @@ defmodule CashCadenceWeb.InboxLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/entrada")
 
-    assert has_element?(
-             view,
-             "#item-#{bakery.id}-category[list='inbox-category-options'][phx-hook='Typeahead']"
-           )
+    field = "#item-#{bakery.id}-category[phx-hook='Combobox'][role='combobox']"
 
-    assert has_element?(view, "#inbox-category-options option[value='Comida']")
+    assert has_element?(view, field)
+    assert has_element?(view, "#item-#{bakery.id}-category-listbox[role='listbox']")
+    assert render(element(view, field)) =~ "Comida"
   end
 end

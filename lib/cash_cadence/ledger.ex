@@ -97,7 +97,11 @@ defmodule CashCadence.Ledger do
   def get_category_by_name(name) when is_binary(name) do
     lowered = name |> String.trim() |> String.downcase()
 
-    Repo.one(from c in Category, where: fragment("lower(?)", c.name) == ^lowered, limit: 1)
+    Repo.one(
+      from c in Category,
+        where: fragment("unaccent(lower(?))", c.name) == fragment("unaccent(?)", ^lowered),
+        limit: 1
+    )
   end
 
   def create_category(attrs), do: %Category{} |> Category.changeset(attrs) |> Repo.insert()
@@ -563,7 +567,9 @@ defmodule CashCadence.Ledger do
     from t in query,
       left_join: c in assoc(t, :category),
       where:
-        ilike(t.description, ^like) or ilike(t.raw_description, ^like) or ilike(c.name, ^like)
+        fragment("unaccent(?) ilike unaccent(?)", t.description, ^like) or
+          fragment("unaccent(?) ilike unaccent(?)", t.raw_description, ^like) or
+          fragment("unaccent(?) ilike unaccent(?)", c.name, ^like)
   end
 
   defp filter_search(query, _), do: query

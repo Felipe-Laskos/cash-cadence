@@ -95,7 +95,7 @@ defmodule CashCadenceWeb.SettingsLive do
       accounts: Ledger.list_bank_accounts(),
       last_batch: List.first(Imports.list_batches(1)),
       pending_count: Imports.count_pending(),
-      suggestions: Ledger.category_suggestions(),
+      category_options: category_options(Ledger.category_suggestions()),
       auto_approve: Settings.auto_approve?(),
       backup: Backup.Scheduler.config(),
       backup_files:
@@ -275,10 +275,6 @@ defmodule CashCadenceWeb.SettingsLive do
       <nav class="flex flex-wrap gap-1">
         <a :for={{id, label} <- @sections} href={"##{id}"} class="btn btn-sm btn-ghost">{label}</a>
       </nav>
-
-      <datalist id="settings-category-options">
-        <option :for={suggestion <- @suggestions} value={suggestion.name}></option>
-      </datalist>
 
       <section id="importacao" class="space-y-4 scroll-mt-4">
         <.card title="Extratos e faturas" subtitle="OFX e CSV do Nubank, PDF do Itaú">
@@ -508,14 +504,11 @@ defmodule CashCadenceWeb.SettingsLive do
                       data-autofocus
                     />
                   </div>
-                  <.input
+                  <.combobox
                     field={@rule_form[:category_name]}
-                    type="text"
                     label="Categoria"
                     placeholder="Ex.: Combustível"
-                    list="settings-category-options"
-                    phx-hook="Typeahead"
-                    autocomplete="off"
+                    options={@category_options}
                   />
                   <.input
                     field={@rule_form[:kind_override]}

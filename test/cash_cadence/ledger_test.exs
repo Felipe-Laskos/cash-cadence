@@ -25,6 +25,14 @@ defmodule CashCadence.LedgerTest do
       assert created.kind == :income
     end
 
+    test "find_or_create_category reuses an existing name regardless of accents" do
+      category = category_fixture(%{name: "Água"})
+      assert {:ok, found} = Ledger.find_or_create_category("agua", :expense)
+      assert found.id == category.id
+      assert {:ok, again} = Ledger.find_or_create_category("ÁGUA", :expense)
+      assert again.id == category.id
+    end
+
     test "category_suggestions orders by usage" do
       rare = category_fixture(%{name: "Raro"})
       common = category_fixture(%{name: "Comum"})
@@ -223,6 +231,26 @@ defmodule CashCadence.LedgerTest do
 
       assert [%{competence: ~D[2026-04-01]}] =
                Ledger.list_transactions(%{competence: ~D[2026-04-01]})
+    end
+
+    test "list_transactions search ignores accents", %{fuel: fuel} do
+      transaction_fixture(%{
+        date: ~D[2026-05-16],
+        kind: :expense,
+        amount: "12.00",
+        description: "Água do prédio"
+      })
+
+      assert [%{description: "Água do prédio"}] =
+               Ledger.list_transactions(%{competence: ~D[2026-05-01], search: "agua"})
+
+      assert [%{description: "Água do prédio"}] =
+               Ledger.list_transactions(%{competence: ~D[2026-05-01], search: "ÁGUA"})
+
+      assert [%{category_id: id}] =
+               Ledger.list_transactions(%{competence: ~D[2026-05-01], search: "combustivel"})
+
+      assert id == fuel.id
     end
 
     test "recent_transactions returns the latest first" do

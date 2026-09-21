@@ -173,24 +173,20 @@ defmodule CashCadenceWeb.TransactionLiveTest do
     assert has_element?(view, "#transaction-form")
   end
 
-  test "wires the category field to the suggestion typeahead", %{conn: conn} do
+  test "wires the category field to the suggestion combobox", %{conn: conn} do
     category_fixture(%{name: "Comida"})
     transaction = transaction_fixture(%{date: ~D[2026-05-13], amount: "100.00"})
 
     {:ok, view, _html} = live(conn, ~p"/lancamentos?m=2026-05")
 
-    assert has_element?(
-             view,
-             "#transaction_category_name[list='category-options'][phx-hook='Typeahead']"
-           )
+    field = "#transaction_category_name[phx-hook='Combobox'][role='combobox']"
 
-    assert has_element?(view, "#category-options option[value='Comida']")
+    assert has_element?(view, field)
+    assert has_element?(view, "#transaction_category_name-listbox[role='listbox']")
+    assert render(element(view, field)) =~ "Comida"
 
     {:ok, view, _html} = live(conn, ~p"/lancamentos?edit=#{transaction.id}&m=2026-05")
 
-    assert has_element?(
-             view,
-             "#transaction-modal #transaction_category_name[list='category-options'][phx-hook='Typeahead']"
-           )
+    assert has_element?(view, "#transaction-modal #{field}")
   end
 end

@@ -96,6 +96,14 @@ defmodule CashCadenceWeb.UIComponents do
     """
   end
 
+  def category_options(suggestions) do
+    Enum.map(suggestions, &%{value: &1.name, hint: category_hint(&1)})
+  end
+
+  defp category_hint(%{uses: uses, fixed: true}), do: "#{uses} usos · fixa"
+  defp category_hint(%{uses: uses}), do: "#{uses} usos"
+  defp category_hint(_suggestion), do: nil
+
   attr :value, :any, required: true
   attr :kind, :atom, default: :expense
   attr :currency, :boolean, default: false

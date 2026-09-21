@@ -59,7 +59,7 @@ defmodule CashCadenceWeb.TransactionLive.Index do
       count: length(transactions),
       totals: Ledger.month_totals(month),
       uncategorized: Ledger.count_uncategorized(month),
-      suggestions: Ledger.category_suggestions(),
+      category_options: category_options(Ledger.category_suggestions()),
       categories: Ledger.list_categories()
     )
     |> stream(:days, group_by_day(transactions), reset: true)
@@ -337,22 +337,12 @@ defmodule CashCadenceWeb.TransactionLive.Index do
         >
           <.input field={@form[:date]} type="br_date" required />
           <.input field={@form[:kind]} type="select" options={@kinds} />
-          <div>
-            <.input
-              field={@form[:category_name]}
-              type="text"
-              list="category-options"
-              phx-hook="Typeahead"
-              autocomplete="off"
-              placeholder="Categoria"
-              phx-mounted={@focus_new && JS.focus()}
-            />
-            <datalist id="category-options">
-              <option :for={suggestion <- @suggestions} value={suggestion.name}>
-                {suggestion.uses} usos{if suggestion.fixed, do: " · fixa"}
-              </option>
-            </datalist>
-          </div>
+          <.combobox
+            field={@form[:category_name]}
+            options={@category_options}
+            placeholder="Categoria"
+            phx-mounted={@focus_new && JS.focus()}
+          />
           <.input field={@form[:description]} type="text" placeholder="Descrição (opcional)" />
           <.input
             field={@form[:amount]}
@@ -396,23 +386,13 @@ defmodule CashCadenceWeb.TransactionLive.Index do
               <div class="grid gap-x-4 sm:grid-cols-2">
                 <.input field={@form[:date]} type="br_date" label="Data" required />
                 <.input field={@form[:kind]} type="select" label="Tipo" options={@kinds} />
-                <div>
-                  <.input
-                    field={@form[:category_name]}
-                    type="text"
-                    label="Categoria"
-                    list="category-options"
-                    phx-hook="Typeahead"
-                    autocomplete="off"
-                    placeholder="Categoria"
-                    data-autofocus
-                  />
-                  <datalist id="category-options">
-                    <option :for={suggestion <- @suggestions} value={suggestion.name}>
-                      {suggestion.uses} usos{if suggestion.fixed, do: " · fixa"}
-                    </option>
-                  </datalist>
-                </div>
+                <.combobox
+                  field={@form[:category_name]}
+                  label="Categoria"
+                  options={@category_options}
+                  placeholder="Categoria"
+                  data-autofocus
+                />
                 <.input
                   field={@form[:description]}
                   type="text"

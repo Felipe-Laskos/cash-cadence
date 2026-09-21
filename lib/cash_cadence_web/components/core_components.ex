@@ -384,6 +384,79 @@ defmodule CashCadenceWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a text input with a suggestion list that matches without accents.
+
+  The browser's own `<datalist>` filter ignores case but not accents, so the
+  list is rendered by the `Combobox` hook. Each option is a map with a
+  `:value` and an optional `:hint`.
+
+  ```heex
+  <.combobox field={@form[:category_name]} label="Categoria" options={category_options(@suggestions)} />
+  ```
+  """
+  attr :id, :any, default: nil
+  attr :name, :any
+  attr :value, :any
+  attr :label, :string, default: nil
+  attr :options, :list, required: true
+  attr :errors, :list, default: []
+  attr :class, :any, default: nil
+  attr :error_class, :any, default: nil
+  attr :wrapper_class, :any, default: "fieldset mb-2"
+
+  attr :field, Phoenix.HTML.FormField,
+    doc: "a form field struct retrieved from the form, for example: @form[:category_name]"
+
+  attr :rest, :global, include: ~w(disabled form placeholder readonly required)
+
+  def combobox(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    errors = if Phoenix.Component.used_input?(field), do: field.errors, else: []
+
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(errors, &translate_error(&1)))
+    |> assign_new(:name, fn -> field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> combobox()
+  end
+
+  def combobox(assigns) do
+    ~H"""
+    <div class={@wrapper_class}>
+      <div class="relative">
+        <label for={@id} class="block">
+          <span :if={@label} class="label mb-1">{@label}</span>
+          <input
+            type="text"
+            id={@id}
+            name={@name}
+            value={@value}
+            role="combobox"
+            autocomplete="off"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls={"#{@id}-listbox"}
+            data-options={Jason.encode!(@options)}
+            phx-hook="Combobox"
+            class={[@class || "w-full input", @errors != [] && (@error_class || "input-error")]}
+            {@rest}
+          />
+        </label>
+        <ul
+          id={"#{@id}-listbox"}
+          role="listbox"
+          phx-update="ignore"
+          hidden
+          class="absolute left-0 top-full z-30 mt-1 max-h-60 w-max min-w-full max-w-80 overflow-y-auto rounded-box border border-base-300 bg-base-100 py-1 shadow-lg"
+        >
+        </ul>
+      </div>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
